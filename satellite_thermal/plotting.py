@@ -36,7 +36,7 @@ def plot_temperature_history(
     axis.text(
         0.0,
         -0.22,
-        "Simplified teaching model. Not a prediction of an actual satellite.",
+        "Simplified single-node model.",
         transform=axis.transAxes,
         fontsize=8,
         color="#444444",

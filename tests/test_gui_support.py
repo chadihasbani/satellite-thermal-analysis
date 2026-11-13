@@ -8,8 +8,10 @@ from satellite_thermal.gui_support import (
     GuiRunRequest,
     build_model_inputs,
     default_gui_request,
+    request_fingerprint,
     run_gui_simulation,
     temperature_metrics_c,
+    validate_gui_request,
 )
 from satellite_thermal.orbital_simulation import simulate_orbital_eclipse
 from satellite_thermal.parameters import Phase1Parameters
@@ -64,6 +66,39 @@ class GuiSupportTests(unittest.TestCase):
         request = GuiRunRequest(**{**default_gui_request().__dict__, "orbit_count": 0})
         with self.assertRaises(ValueError):
             run_gui_simulation(request)
+
+    def test_rejects_temperature_at_or_below_absolute_zero(self) -> None:
+        request = GuiRunRequest(
+            **{**default_gui_request().__dict__, "initial_temperature_c": -273.15}
+        )
+        with self.assertRaises(ValueError):
+            validate_gui_request(request)
+
+    def test_rejects_negative_internal_heat(self) -> None:
+        request = GuiRunRequest(
+            **{**default_gui_request().__dict__, "internal_heat_w": -1.0}
+        )
+        with self.assertRaises(ValueError):
+            validate_gui_request(request)
+
+    def test_rejects_excessive_sample_count(self) -> None:
+        request = GuiRunRequest(
+            **{
+                **default_gui_request().__dict__,
+                "orbit_count": 20,
+                "time_step_s": 0.1,
+            }
+        )
+        with self.assertRaises(ValueError):
+            validate_gui_request(request)
+
+    def test_fingerprint_changes_when_mass_changes(self) -> None:
+        base = default_gui_request()
+        modified = GuiRunRequest(**{**base.__dict__, "mass_kg": 8.0})
+        self.assertNotEqual(
+            request_fingerprint("single", base),
+            request_fingerprint("single", modified),
+        )
 
     def test_phase1_defaults_unchanged(self) -> None:
         settings = Phase1Parameters()

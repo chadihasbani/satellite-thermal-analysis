@@ -8,6 +8,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import _bootstrap
+from _bootstrap import ROOT
+
 from satellite_thermal.sensitivity import (
     cases_in_group,
     run_sensitivity_study,
@@ -15,7 +18,7 @@ from satellite_thermal.sensitivity import (
 from satellite_thermal.sensitivity_plot import plot_sensitivity_group
 from satellite_thermal.units import kelvin_to_celsius
 
-OUTPUT_DIR = Path("outputs")
+OUTPUT_DIR = ROOT / "outputs"
 PLOT_GROUPS = (
     ("absorptivity", "Absorptivity sensitivity", "phase4_absorptivity.png"),
     ("emissivity", "Emissivity sensitivity (Kirchhoff alpha_ir = epsilon)", "phase4_emissivity.png"),

@@ -71,7 +71,7 @@ def plot_sensitivity_group(
     axis.text(
         0.0,
         -0.22,
-        "Sensitivity of the teaching model. Not experimental validation.",
+        "Sensitivity of the single-node model. Not experimental validation.",
         transform=axis.transAxes,
         fontsize=8,
         color="#444444",

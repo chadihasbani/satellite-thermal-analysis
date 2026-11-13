@@ -1,8 +1,7 @@
-"""Simplified single-node satellite thermal model.
+"""Single-node satellite thermal analysis package.
 
-Phase 1 is continuous sunlight. Phase 2 adds a circular orbit and a
-cylindrical Earth shadow. The package is a learning model. It does not
-predict the temperature of a real satellite.
+Phase 1: continuous sunlight. Phase 2+: circular LEO orbit, eclipse, optional
+Earth IR and albedo. The GUI and CLI scripts call these verified solvers.
 """
 
 from satellite_thermal.albedo import (

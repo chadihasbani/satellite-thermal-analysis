@@ -1,6 +1,5 @@
 """Run five circular orbits with geometric eclipse and save the plot.
 
-Phase 1 remains `python main.py`. This script does not change that study.
 Earth infrared and albedo are not included.
 """
 
@@ -9,13 +8,16 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import _bootstrap
+from _bootstrap import ROOT
+
 from satellite_thermal.orbit import CircularOrbit, orbital_radius_m
 from satellite_thermal.orbital_plot import plot_orbital_temperature
 from satellite_thermal.orbital_simulation import simulate_orbital_eclipse
 from satellite_thermal.parameters import Phase1Parameters
 from satellite_thermal.units import kelvin_to_celsius
 
-DEFAULT_PLOT = Path("outputs") / "phase2_temperature.png"
+DEFAULT_PLOT = ROOT / "outputs" / "phase2_temperature.png"
 
 
 def build_parser() -> argparse.ArgumentParser:

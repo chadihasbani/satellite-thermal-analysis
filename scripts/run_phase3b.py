@@ -1,13 +1,12 @@
-"""Compare Phase 3A (Earth IR) with Phase 3B (Earth IR + albedo).
-
-Phase 1 remains `python main.py`. Phase 2 remains `python run_phase2.py`.
-Phase 3A alone remains `python run_phase3a.py`.
-"""
+"""Compare Phase 3A (Earth IR) with Phase 3B (Earth IR + albedo)."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
+
+import _bootstrap
+from _bootstrap import ROOT
 
 from satellite_thermal.albedo import (
     AlbedoParameters,
@@ -21,7 +20,7 @@ from satellite_thermal.orbital_simulation import simulate_orbital_eclipse
 from satellite_thermal.parameters import Phase1Parameters
 from satellite_thermal.units import kelvin_to_celsius
 
-DEFAULT_PLOT = Path("outputs") / "phase3b_albedo_comparison.png"
+DEFAULT_PLOT = ROOT / "outputs" / "phase3b_albedo_comparison.png"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -114,7 +113,7 @@ def run(
     )
 
     print("Phase 3B comparison: Earth albedo heating")
-    print("Teaching result. Not a flight prediction.")
+    print("Simplified single-node model result.")
     print(f"Earth Bond albedo a: {albedo.earth_bond_albedo:.2f}")
     print(f"Albedo area A_albedo: {albedo.albedo_area_m2:.4f} m^2")
     print(f"Solar absorptivity alpha: {thermal.absorptivity:.2f}")

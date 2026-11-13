@@ -1,8 +1,7 @@
 """Compare Phase 2 (no Earth IR) with Phase 3A (Earth IR on).
 
-Phase 1 remains `python main.py`. Phase 2 alone remains `python run_phase2.py`.
-This script keeps the same orbit, eclipse geometry, and thermal parameters.
-Only the optional Earth-infrared term changes between the two histories.
+Keeps the same orbit, eclipse geometry, and thermal parameters.
+Only the optional Earth IR term changes between the two histories.
 Albedo is not included.
 """
 
@@ -10,6 +9,9 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+
+import _bootstrap
+from _bootstrap import ROOT
 
 from satellite_thermal.comparison_plot import plot_phase2_phase3a_comparison
 from satellite_thermal.earth_infrared import (
@@ -22,7 +24,7 @@ from satellite_thermal.orbital_simulation import simulate_orbital_eclipse
 from satellite_thermal.parameters import Phase1Parameters
 from satellite_thermal.units import kelvin_to_celsius
 
-DEFAULT_PLOT = Path("outputs") / "phase3a_earth_ir_comparison.png"
+DEFAULT_PLOT = ROOT / "outputs" / "phase3a_earth_ir_comparison.png"
 
 
 def build_parser() -> argparse.ArgumentParser:

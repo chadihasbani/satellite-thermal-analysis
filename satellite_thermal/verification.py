@@ -125,7 +125,7 @@ def verification_report(
 
     lines = [
         "Phase 1 verification",
-        "Simplified teaching model. Not a flight-temperature prediction.",
+        "Simplified single-node model. Numerical verification only.",
         "",
         "Analytical equilibrium",
         "T_eq = ((Q_solar + Q_internal) / (epsilon * sigma * A_radiating)) ** 0.25",

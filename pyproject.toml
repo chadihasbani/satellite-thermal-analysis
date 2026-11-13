@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "satellite-thermal-analysis"
+version = "1.0.0"
+description = "Single-node LEO satellite thermal analysis with Streamlit GUI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+  "matplotlib>=3.8",
+  "streamlit>=1.28",
+  "plotly>=5.18",
+]
+
+[project.optional-dependencies]
+dev = []
+
+[tool.setuptools.packages.find]
+include = ["satellite_thermal*"]
+
+[tool.setuptools.package-data]
+satellite_thermal = ["py.typed"]
