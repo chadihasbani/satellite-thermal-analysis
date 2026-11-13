@@ -5,6 +5,11 @@ cylindrical Earth shadow. The package is a learning model. It does not
 predict the temperature of a real satellite.
 """
 
+from satellite_thermal.albedo import (
+    AlbedoParameters,
+    albedo_heat_w_at_time,
+    albedo_heating,
+)
 from satellite_thermal.earth_infrared import (
     EarthInfraredParameters,
     earth_infrared_heat_w,
@@ -29,10 +34,13 @@ from satellite_thermal.units import kelvin_to_celsius
 
 __all__ = [
     "STEFAN_BOLTZMANN",
+    "AlbedoParameters",
     "CircularOrbit",
     "EarthInfraredParameters",
     "Phase1Parameters",
     "SimulationResult",
+    "albedo_heat_w_at_time",
+    "albedo_heating",
     "analytical_equilibrium_temperature",
     "earth_infrared_heat_w",
     "earth_infrared_heating",

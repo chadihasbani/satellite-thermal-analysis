@@ -2,11 +2,10 @@
 
 Governing energy balance
 ------------------------
-    m * cp * dT/dt = Q_solar + Q_internal + Q_earth_ir - Q_radiated
+    m * cp * dT/dt = Q_solar + Q_internal + Q_earth_ir + Q_albedo - Q_radiated
 
-Phase 1 and Phase 2 leave Q_earth_ir at zero. Phase 3A may supply a
-non-zero Earth-infrared term. The default remains zero so earlier results
-are unchanged.
+Optional planetary loads default to zero so Phase 1 and Phase 2 results stay
+unchanged. Phase 3A may enable Q_earth_ir. Phase 3B may also enable Q_albedo.
 
 Solar heating
 -------------
@@ -15,8 +14,13 @@ Solar heating
 
 Earth infrared heating (optional)
 ---------------------------------
-    Q_earth_ir is an absorbed planetary load in watts. See earth_infrared.py.
+    Q_earth_ir is an absorbed planetary IR load in watts. See earth_infrared.py.
     Default is 0 W.
+
+Albedo heating (optional)
+-------------------------
+    Q_albedo is absorbed Earth-reflected sunlight in watts. See albedo.py.
+    It uses solar absorptivity, not infrared emissivity. Default is 0 W.
 
 Radiative cooling
 -----------------
@@ -25,7 +29,7 @@ Radiative cooling
 
 Temperature derivative
 ----------------------
-    dT/dt = (Q_solar + Q_internal + Q_earth_ir - Q_radiated) / (m * cp)
+    dT/dt = (Q_solar + Q_internal + Q_earth_ir + Q_albedo - Q_radiated) / (m * cp)
     Units: W / (kg * J / (kg K)) = K / s
     because 1 W = 1 J / s.
 
@@ -100,13 +104,14 @@ def temperature_derivative(
     radiating_area_m2: float,
     stefan_boltzmann_w_per_m2_k4: float = STEFAN_BOLTZMANN,
     earth_infrared_heat_w: float = 0.0,
+    albedo_heat_w: float = 0.0,
 ) -> float:
     """Node heating rate dT/dt in K/s.
 
-    dT/dt = (Q_solar + Q_internal + Q_earth_ir - Q_radiated) / (m * cp)
+    dT/dt = (Q_solar + Q_internal + Q_earth_ir + Q_albedo - Q_radiated) / (m * cp)
 
-    earth_infrared_heat_w defaults to 0 W so Phase 1 and Phase 2 callers
-    keep their previous energy balance.
+    Optional planetary loads default to 0 W so earlier phases keep their
+    previous energy balance.
     """
     temperature = require_positive("temperature_k", temperature_k)
     mass = require_positive("mass_kg", mass_kg)
@@ -115,6 +120,7 @@ def temperature_derivative(
     )
     internal_heat = require_finite_number("internal_heat_w", internal_heat_w)
     earth_ir = require_finite_number("earth_infrared_heat_w", earth_infrared_heat_w)
+    albedo = require_finite_number("albedo_heat_w", albedo_heat_w)
 
     absorbed_solar = solar_heating(
         absorptivity, projected_area_m2, solar_flux_w_per_m2
@@ -125,6 +131,6 @@ def temperature_derivative(
         temperature,
         stefan_boltzmann_w_per_m2_k4,
     )
-    net_power_w = absorbed_solar + internal_heat + earth_ir - emitted
+    net_power_w = absorbed_solar + internal_heat + earth_ir + albedo - emitted
     thermal_capacity_j_per_k = mass * specific_heat
     return net_power_w / thermal_capacity_j_per_k

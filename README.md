@@ -8,7 +8,7 @@ Phase 1 is the lumped energy balance in continuous sunlight. Phase 2 keeps
 that balance and adds a circular low-Earth orbit. Direct solar heating is
 turned off only while a cylindrical Earth-shadow test says the satellite is
 in eclipse. Phase 3A optionally adds simplified Earth infrared heating.
-Albedo and a GUI are still absent.
+Phase 3B optionally adds angle-dependent Earth albedo. A GUI is still absent.
 
 ## Phase 1 — continuous sunlight
 
@@ -68,24 +68,27 @@ main.py                         Phase 1: 90 minutes of sunlight and its plot
 verify_phase1.py                Phase 1 equilibrium and time-step checks
 run_phase2.py                   Phase 2: five orbits and the eclipse plot
 run_phase3a.py                  Phase 3A: Phase 2 vs Earth-IR comparison
+run_phase3b.py                  Phase 3B: Earth IR vs Earth IR + albedo
 satellite_thermal/
     parameters.py               Named thermal inputs, units, and validation
     validation.py               Shared numeric checks
-    heat_transfer.py            Q_solar, Q_radiated, optional Q_earth_ir, dT/dt
+    heat_transfer.py            Heat rates and optional planetary loads
     simulation.py               Explicit Euler in continuous sunlight
     equilibrium.py              Analytical steady temperature
     verification.py             Long-run and time-step comparisons
     orbit.py                    Period, position, and cylindrical shadow
-    orbital_simulation.py       Sunlight/eclipse march; optional Earth IR
+    orbital_simulation.py       Sunlight/eclipse march; optional IR/albedo
     orbital_plot.py             Phase 2 temperature plot with eclipses
     earth_infrared.py           View factor and absorbed Earth IR
-    comparison_plot.py          Phase 2 vs Phase 3A comparison figure
+    albedo.py                   Angle-dependent Earth albedo heating
+    comparison_plot.py          Phase comparison figures
     units.py                    Kelvin to Celsius for display
     plotting.py                 Phase 1 temperature-time figure
 tests/test_heat_transfer.py     Heat-rate and input checks
 tests/test_verification.py      Equilibrium and convergence checks
 tests/test_orbit.py             Period, shadow geometry, and eclipse heating
 tests/test_earth_infrared.py    Earth IR heating and compatibility checks
+tests/test_albedo.py            Albedo heating and compatibility checks
 requirements.txt
 ```
 
@@ -113,6 +116,13 @@ python run_phase3a.py
 
 writes `outputs/phase3a_earth_ir_comparison.png`, comparing five orbits without
 and with Earth infrared heating.
+
+```text
+python run_phase3b.py
+```
+
+writes `outputs/phase3b_albedo_comparison.png`, comparing Earth IR only against
+Earth IR plus albedo.
 
 ```text
 python verify_phase1.py
@@ -394,5 +404,70 @@ emission remains larger than the total heat input. The comparison plot is
 - `A_earth` is an assumed effective area, not a multi-surface CAD projection.
 - Emission still uses the full radiating area to a 0 K sink. A higher-fidelity
   model would split space and Earth view factors.
-- Albedo is excluded. Multiple thermal nodes and a GUI are excluded.
+- Phase 3A itself still leaves albedo off. Phase 3B adds that load optionally.
+  Multiple thermal nodes and a GUI are excluded.
 - Phase 1 and Phase 2 defaults, plots, and verification methods are preserved.
+
+## Phase 3B — Earth albedo (reflected sunlight)
+
+Phase 3B keeps the Phase 2 orbit/eclipse model and the Phase 3A Earth-IR term.
+It adds an optional albedo load that uses **solar absorptivity**, not infrared
+emissivity.
+
+### Equations and units
+
+```text
+m * cp * dT/dt = Q_solar + Q_internal + Q_earth_ir + Q_albedo - Q_radiated
+
+Q_albedo = alpha * A_albedo * F_albedo * a * S
+F_albedo = F_earth * max(cos(theta), 0)
+F_earth  = (R_earth / r_orbit)^2
+```
+
+| Symbol | Name | Unit | Phase 3B value |
+| --- | --- | --- | --- |
+| `a` | Earth Bond albedo | — | 0.30 |
+| `alpha` | Solar absorptivity | — | 0.60 |
+| `A_albedo` | Effective albedo area | m² | 0.01 |
+| `S` | Solar constant | W/m² | 1361 |
+| `F_earth` | Earth view factor | — | 0.859756 |
+| `F_albedo(theta=0)` | Peak albedo geometry factor | — | 0.859756 |
+| `Q_albedo` peak | Absorbed albedo at subsolar point | W | 2.106231 |
+
+`theta` is the orbital angle from the sunward axis. The cosine factor is a
+teaching approximation: reflected sunlight is strongest over the day side and
+is zero over the night side. If the cylindrical shadow test says the satellite
+is in eclipse, `Q_albedo = 0`.
+
+### Why albedo differs from Earth IR
+
+| Load | Spectrum | Absorptivity | In eclipse? |
+| --- | --- | --- | --- |
+| Direct solar | Solar | `alpha = 0.60` | No (forced to 0) |
+| Albedo | Solar (reflected) | `alpha = 0.60` | No (forced to 0) |
+| Earth IR | Infrared | `alpha_ir = epsilon = 0.80` | Yes (constant) |
+
+### Five-orbit comparison
+
+Both cases keep Earth IR on; only albedo changes.
+
+| Case | Initial | Minimum | Maximum | Final |
+| --- | --- | --- | --- | --- |
+| Phase 3A (IR on, albedo off) | 293.1500 K (20.0000 °C) | 265.8598 K (-7.2902 °C) | 293.1500 K (20.0000 °C) | 266.3187 K (-6.8313 °C) |
+| Phase 3B (IR on, albedo on) | 293.1500 K (20.0000 °C) | 267.8996 K (-5.2504 °C) | 293.1500 K (20.0000 °C) | 268.6114 K (-4.5386 °C) |
+| Difference (3B - 3A) | 0 K | +2.0398 K | 0 K | +2.2927 K |
+
+Albedo warms the day side, so the minimum and final temperatures rise by about
+2 K over five orbits. The maximum stays at the shared initial 20 °C because
+neither case heats above the start. The comparison plot is
+`outputs/phase3b_albedo_comparison.png`.
+
+### Assumptions and limitations
+
+- Bond albedo `a = 0.30` is a common global-mean teaching value, not a local
+  cloudy-Earth map.
+- `F_albedo = F_earth * max(cos(theta), 0)` is simplified. Real albedo models
+  use more detailed reflectance and attitude.
+- Albedo uses the same effective area scale as the other projected loads.
+- Defaults keep albedo off, so Phases 1, 2, and 3A remain unchanged when their
+  previous flags are used.
