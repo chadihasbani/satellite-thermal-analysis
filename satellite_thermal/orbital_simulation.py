@@ -1,8 +1,12 @@
-"""Phase 2 thermal march: existing energy balance plus orbit eclipse.
+"""Orbital thermal march: energy balance plus geometric eclipse.
 
 Direct solar heating uses the Phase 1 flux while the satellite is in
 sunlight and is set to zero while `in_eclipse_at_time` is true. Internal heat
-and radiative emission are unchanged. Earth infrared and albedo are not added.
+and radiative emission keep the Phase 1 forms.
+
+Phase 2 leaves Earth infrared off (default). Phase 3A may add a constant
+absorbed Earth-infrared term that is available in both sunlight and eclipse.
+Albedo is not included.
 
 The integrator is the same explicit Euler update as Phase 1:
 
@@ -15,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from satellite_thermal.earth_infrared import EarthInfraredParameters, earth_infrared_heat_w
 from satellite_thermal.heat_transfer import temperature_derivative
 from satellite_thermal.orbit import (
     CircularOrbit,
@@ -71,6 +76,8 @@ class OrbitalThermalResult:
 
     in_eclipse[i] is the shadow state at time_s[i]. For every step except the
     final stored instant, that flag is the state used to choose the solar flux.
+    earth_infrared_heat_w is the constant absorbed Earth IR used in the run,
+    or 0.0 when Phase 2 (Earth IR off) is selected.
     """
 
     time_s: tuple[float, ...]
@@ -81,6 +88,7 @@ class OrbitalThermalResult:
     sunlight_duration_s: float
     time_step_s: float
     orbit_count: int
+    earth_infrared_heat_w: float = 0.0
 
     def __post_init__(self) -> None:
         if not (len(self.time_s) == len(self.temperature_k) == len(self.in_eclipse)):
@@ -94,13 +102,21 @@ def simulate_orbital_eclipse(
     time_step_s: float = 1.0,
     parameters: Phase1Parameters | None = None,
     orbit: CircularOrbit | None = None,
+    include_earth_infrared: bool = False,
+    earth_infrared: EarthInfraredParameters | None = None,
 ) -> OrbitalThermalResult:
     """Integrate the single-node balance over complete circular orbits.
 
     Solar heating is the Phase 1 value in sunlight and zero in eclipse.
+    include_earth_infrared defaults to False so Phase 2 results are unchanged.
+    When True, a constant Q_earth_ir is added in both sunlight and eclipse.
     """
     if isinstance(orbit_count, bool) or not isinstance(orbit_count, int) or orbit_count <= 0:
         raise ValueError(f"orbit_count must be a positive integer, got {orbit_count!r}.")
+    if not isinstance(include_earth_infrared, bool):
+        raise ValueError(
+            f"include_earth_infrared must be a bool, got {include_earth_infrared!r}."
+        )
     step_limit = require_positive("time_step_s", time_step_s)
     thermal = (parameters or Phase1Parameters()).validated()
     orbit_settings = (orbit or CircularOrbit()).validated()
@@ -109,6 +125,11 @@ def simulate_orbital_eclipse(
         step_limit, orbit_settings
     )
     duration = orbit_count * period
+    earth_ir_w = (
+        earth_infrared_heat_w(orbit_settings, earth_infrared)
+        if include_earth_infrared
+        else 0.0
+    )
 
     time_s = [0.0]
     temperature_k = [thermal.initial_temperature_k]
@@ -129,6 +150,7 @@ def simulate_orbital_eclipse(
             emissivity=thermal.emissivity,
             radiating_area_m2=thermal.radiating_area_m2,
             stefan_boltzmann_w_per_m2_k4=thermal.stefan_boltzmann_w_per_m2_k4,
+            earth_infrared_heat_w=earth_ir_w,
         )
         elapsed += step
         temperature_k.append(temperature_k[-1] + step * rate)
@@ -144,4 +166,5 @@ def simulate_orbital_eclipse(
         sunlight_duration_s=sunlight_duration,
         time_step_s=step_limit,
         orbit_count=orbit_count,
+        earth_infrared_heat_w=earth_ir_w,
     )

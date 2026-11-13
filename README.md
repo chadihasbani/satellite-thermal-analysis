@@ -7,7 +7,8 @@ This is a learning project for AI-assisted engineering software. It does
 Phase 1 is the lumped energy balance in continuous sunlight. Phase 2 keeps
 that balance and adds a circular low-Earth orbit. Direct solar heating is
 turned off only while a cylindrical Earth-shadow test says the satellite is
-in eclipse. Earth infrared, albedo, and a GUI are still absent.
+in eclipse. Phase 3A optionally adds simplified Earth infrared heating.
+Albedo and a GUI are still absent.
 
 ## Phase 1 — continuous sunlight
 
@@ -66,21 +67,25 @@ and on the plot.
 main.py                         Phase 1: 90 minutes of sunlight and its plot
 verify_phase1.py                Phase 1 equilibrium and time-step checks
 run_phase2.py                   Phase 2: five orbits and the eclipse plot
+run_phase3a.py                  Phase 3A: Phase 2 vs Earth-IR comparison
 satellite_thermal/
     parameters.py               Named thermal inputs, units, and validation
     validation.py               Shared numeric checks
-    heat_transfer.py            Q_solar, Q_radiated, and dT/dt
+    heat_transfer.py            Q_solar, Q_radiated, optional Q_earth_ir, dT/dt
     simulation.py               Explicit Euler in continuous sunlight
     equilibrium.py              Analytical steady temperature
     verification.py             Long-run and time-step comparisons
     orbit.py                    Period, position, and cylindrical shadow
-    orbital_simulation.py       Sunlight/eclipse march of the same energy balance
-    orbital_plot.py             Temperature plot with shaded eclipse intervals
+    orbital_simulation.py       Sunlight/eclipse march; optional Earth IR
+    orbital_plot.py             Phase 2 temperature plot with eclipses
+    earth_infrared.py           View factor and absorbed Earth IR
+    comparison_plot.py          Phase 2 vs Phase 3A comparison figure
     units.py                    Kelvin to Celsius for display
     plotting.py                 Phase 1 temperature-time figure
 tests/test_heat_transfer.py     Heat-rate and input checks
 tests/test_verification.py      Equilibrium and convergence checks
 tests/test_orbit.py             Period, shadow geometry, and eclipse heating
+tests/test_earth_infrared.py    Earth IR heating and compatibility checks
 requirements.txt
 ```
 
@@ -101,6 +106,13 @@ python run_phase2.py
 
 writes `outputs/phase2_temperature.png` for five orbits at a 1 s step.
 `--orbits` and `--time-step` change that run. Phase 1 is still `python main.py`.
+
+```text
+python run_phase3a.py
+```
+
+writes `outputs/phase3a_earth_ir_comparison.png`, comparing five orbits without
+and with Earth infrared heating.
 
 ```text
 python verify_phase1.py
@@ -302,6 +314,85 @@ This is a teaching transient, not a flight prediction.
   isothermal node.
 - Eclipse duration reported by the 1 s run is the sampled shadow test, so it
   can differ from `asin(R/r)` by less than one step.
-- No Earth infrared or albedo. Those loads would warm the node in eclipse and
-  are reserved for a later phase.
+- Phase 2 itself still leaves Earth infrared off. Phase 3A adds that load
+  optionally. Albedo remains reserved for a later phase.
 - The Phase 1 continuous-sunlight case remains `python main.py`.
+
+## Phase 3A — simplified Earth infrared heating
+
+Phase 3A keeps the Phase 2 orbit, eclipse geometry, and thermal parameters.
+It only turns on an optional absorbed Earth-infrared term. Albedo, multiple
+nodes, and a GUI are not included.
+
+### Equations and units
+
+The energy balance becomes
+
+```text
+m * cp * dT/dt = Q_solar + Q_internal + Q_earth_ir - Q_radiated
+```
+
+with
+
+```text
+Q_earth_ir = alpha_ir * A_earth * F_earth * E_olr
+F_earth    = (R_earth / r_orbit)^2
+```
+
+| Symbol | Name | Unit | Phase 3A value |
+| --- | --- | --- | --- |
+| `E_olr` | Illustrative TOA outgoing longwave radiation | W/m² | 240 |
+| `F_earth` | Nadir-facing flat-plate view factor to Earth | — | 0.859756 |
+| `A_earth` | Effective Earth-facing area | m² | 0.01 |
+| `alpha_ir` | Infrared absorptivity | — | 0.80 (= ε) |
+| `Q_earth_ir` | Absorbed Earth IR | W | 1.650732 |
+
+`E_olr` is a teaching global-mean flux near the top of the atmosphere. It is
+not the irradiance on the spacecraft until `F_earth` and `A_earth` convert it.
+`alpha_ir` defaults to the existing infrared emissivity under Kirchhoff's law
+for a gray surface. `A_earth = 0.01 m²` is an effective nadir-facing area at
+the same scale as the existing projected area (one face of a ~0.1 m class
+body). `A_radiating = 0.06 m²` still governs emission to space.
+
+### Relation to radiation-to-space
+
+`Q_radiated = epsilon * sigma * A_radiating * T**4` remains emission toward a
+0 K sink. Phase 3A does **not** replace that term with a coupled Earth-spacecraft
+radiosity exchange. Surfaces that see Earth are not given a reduced space view
+factor, and Earth is not inserted as `sigma T_earth**4` in the energy balance.
+Adding `Q_earth_ir` separately is a common teaching decomposition. It is
+physically useful for comparing load magnitude, but it is not an exact
+spacecraft thermal model.
+
+### Availability in sunlight and eclipse
+
+`Q_earth_ir` is constant on the circular 500 km orbit and is applied in both
+sunlight and eclipse. Direct solar heating is still zero only in eclipse.
+`include_earth_infrared=False` remains the default in
+`simulate_orbital_eclipse`, so `python run_phase2.py` and the Phase 2 tests
+keep their previous temperatures.
+
+### Five-orbit comparison
+
+| Case | Initial | Minimum | Maximum | Final |
+| --- | --- | --- | --- | --- |
+| Phase 2 (Earth IR off) | 293.1500 K (20.0000 °C) | 260.3333 K (-12.8167 °C) | 293.1500 K (20.0000 °C) | 260.5839 K (-12.5661 °C) |
+| Phase 3A (Earth IR on) | 293.1500 K (20.0000 °C) | 265.8598 K (-7.2902 °C) | 293.1500 K (20.0000 °C) | 266.3187 K (-6.8313 °C) |
+| Difference (3A - 2) | 0 K | +5.5265 K | 0 K | +5.7348 K |
+
+The ~1.65 W Earth-IR load slows cooling, especially in eclipse where solar
+heating is already zero. Both cases still cool over five orbits because
+emission remains larger than the total heat input. The comparison plot is
+`outputs/phase3a_earth_ir_comparison.png`.
+
+### Assumptions and limitations
+
+- `E_olr = 240 W/m²` is illustrative. Real outgoing longwave radiation varies
+  with latitude, weather, and day/night Earth IR; none of that is modeled.
+- `F_earth = (R/r)^2` is the nadir-facing flat-plate factor for a sphere. It
+  does not account for attitude motion or self-shadowing.
+- `A_earth` is an assumed effective area, not a multi-surface CAD projection.
+- Emission still uses the full radiating area to a 0 K sink. A higher-fidelity
+  model would split space and Earth view factors.
+- Albedo is excluded. Multiple thermal nodes and a GUI are excluded.
+- Phase 1 and Phase 2 defaults, plots, and verification methods are preserved.

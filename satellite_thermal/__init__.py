@@ -5,6 +5,12 @@ cylindrical Earth shadow. The package is a learning model. It does not
 predict the temperature of a real satellite.
 """
 
+from satellite_thermal.earth_infrared import (
+    EarthInfraredParameters,
+    earth_infrared_heat_w,
+    earth_infrared_heating,
+    earth_view_factor,
+)
 from satellite_thermal.equilibrium import (
     analytical_equilibrium_temperature,
     equilibrium_temperature_k,
@@ -24,9 +30,13 @@ from satellite_thermal.units import kelvin_to_celsius
 __all__ = [
     "STEFAN_BOLTZMANN",
     "CircularOrbit",
+    "EarthInfraredParameters",
     "Phase1Parameters",
     "SimulationResult",
     "analytical_equilibrium_temperature",
+    "earth_infrared_heat_w",
+    "earth_infrared_heating",
+    "earth_view_factor",
     "equilibrium_temperature_k",
     "in_eclipse_at_time",
     "kelvin_to_celsius",
