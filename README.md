@@ -8,7 +8,8 @@ Phase 1 is the lumped energy balance in continuous sunlight. Phase 2 keeps
 that balance and adds a circular low-Earth orbit. Direct solar heating is
 turned off only while a cylindrical Earth-shadow test says the satellite is
 in eclipse. Phase 3A optionally adds simplified Earth infrared heating.
-Phase 3B optionally adds angle-dependent Earth albedo. A GUI is still absent.
+Phase 3B optionally adds angle-dependent Earth albedo. Phase 4 studies
+parameter sensitivity around the Phase 3B baseline. A GUI is still absent.
 
 ## Phase 1 — continuous sunlight
 
@@ -69,6 +70,7 @@ verify_phase1.py                Phase 1 equilibrium and time-step checks
 run_phase2.py                   Phase 2: five orbits and the eclipse plot
 run_phase3a.py                  Phase 3A: Phase 2 vs Earth-IR comparison
 run_phase3b.py                  Phase 3B: Earth IR vs Earth IR + albedo
+run_phase4.py                   Phase 4: parameter sensitivity study
 satellite_thermal/
     parameters.py               Named thermal inputs, units, and validation
     validation.py               Shared numeric checks
@@ -82,6 +84,8 @@ satellite_thermal/
     earth_infrared.py           View factor and absorbed Earth IR
     albedo.py                   Angle-dependent Earth albedo heating
     comparison_plot.py          Phase comparison figures
+    sensitivity.py              One-at-a-time sensitivity cases
+    sensitivity_plot.py         Sensitivity group temperature plots
     units.py                    Kelvin to Celsius for display
     plotting.py                 Phase 1 temperature-time figure
 tests/test_heat_transfer.py     Heat-rate and input checks
@@ -89,6 +93,7 @@ tests/test_verification.py      Equilibrium and convergence checks
 tests/test_orbit.py             Period, shadow geometry, and eclipse heating
 tests/test_earth_infrared.py    Earth IR heating and compatibility checks
 tests/test_albedo.py            Albedo heating and compatibility checks
+tests/test_sensitivity.py       Sensitivity study checks
 requirements.txt
 ```
 
@@ -123,6 +128,14 @@ python run_phase3b.py
 
 writes `outputs/phase3b_albedo_comparison.png`, comparing Earth IR only against
 Earth IR plus albedo.
+
+```text
+python run_phase4.py
+```
+
+prints the sensitivity table and writes
+`outputs/phase4_absorptivity.png`, `outputs/phase4_emissivity.png`, and
+`outputs/phase4_internal_power.png`.
 
 ```text
 python verify_phase1.py
@@ -471,3 +484,61 @@ neither case heats above the start. The comparison plot is
 - Albedo uses the same effective area scale as the other projected loads.
 - Defaults keep albedo off, so Phases 1, 2, and 3A remain unchanged when their
   previous flags are used.
+
+## Phase 4 — parameter sensitivity
+
+Phase 4 asks which assumptions move the predicted temperature the most. The
+baseline is Phase 3B: five orbits with Earth IR and albedo enabled. Each case
+changes one input. Emissivity cases also update `alpha_ir` so Kirchhoff's law
+stays consistent (`alpha_ir = epsilon`).
+
+This is a sensitivity study of the teaching model. It is **not** experimental
+validation.
+
+### Method
+
+| Group | Perturbations |
+| --- | --- |
+| Solar absorptivity | 0.40, 0.60 (baseline), 0.80 |
+| Emissivity / IR absorptivity | 0.60, 0.80, 1.00 |
+| Internal power | 0, 5, 10 W |
+| Mass (capacitance) | 0.5x, 1x, 2x |
+| Radiating area | 0.04, 0.06, 0.08 m² |
+| Altitude | 400, 500, 600 km |
+
+### Five-orbit results (dt = 1 s)
+
+| Case | Tmin (°C) | Tfinal (°C) | ΔTfinal (K) |
+| --- | --- | --- | --- |
+| Baseline (Phase 3B) | -5.250 | -4.539 | 0 |
+| alpha = 0.40 | -11.244 | -11.151 | -6.612 |
+| alpha = 0.80 | 0.474 | 1.878 | +6.417 |
+| epsilon = alpha_ir = 0.60 | 7.827 | 8.875 | +13.414 |
+| epsilon = alpha_ir = 1.00 | -15.750 | -15.228 | -10.690 |
+| Q_internal = 0 W | -22.354 | -22.190 | -17.651 |
+| Q_internal = 10 W | 10.544 | 11.770 | +16.309 |
+| mass = 0.5x (2.5 kg) | -13.199 | -10.655 | -6.116 |
+| mass = 2x (10 kg) | 3.322 | 3.390 | +7.929 |
+| A_radiating = 0.04 m² | 14.972 | 16.261 | +20.799 |
+| A_radiating = 0.08 m² | -20.475 | -20.055 | -15.516 |
+| altitude = 400 km | -5.108 | -4.398 | +0.141 |
+| altitude = 600 km | -5.413 | -4.698 | -0.160 |
+
+### Interpretation
+
+Over this five-orbit window, the strongest drivers are:
+
+1. **Radiating area** — smaller area reduces emission strongly and warms the node.
+2. **Internal power** — always-on heat; removing or doubling it moves final T by ~17 K.
+3. **Emissivity** — higher `epsilon` cools more (even with matching higher Earth-IR absorptivity).
+4. **Solar absorptivity** — affects direct sun and albedo together.
+5. **Mass / capacitance** — changes how fast temperature responds in this transient; it is not a steady heat source/sink.
+6. **Altitude (400–600 km)** — small effect here compared with optical and power assumptions.
+
+### Assumptions and limitations
+
+- One-at-a-time sweeps omit parameter interactions.
+- Five orbits is still a transient; rankings could shift for a much longer run toward periodic steady state.
+- Altitude changes period, eclipse fraction, and Earth view factor together.
+- Plots shade baseline eclipse intervals; altitude cases have slightly different timing.
+- No claim of accuracy for real SAR satellites.

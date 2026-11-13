@@ -29,6 +29,7 @@ from satellite_thermal.heat_transfer import (
 from satellite_thermal.orbit import CircularOrbit, in_eclipse_at_time, orbital_period_s
 from satellite_thermal.orbital_simulation import simulate_orbital_eclipse, solar_flux_w_per_m2
 from satellite_thermal.parameters import STEFAN_BOLTZMANN, Phase1Parameters
+from satellite_thermal.sensitivity import baseline_case, run_sensitivity_study
 from satellite_thermal.simulation import SimulationResult, simulate_continuous_sunlight
 from satellite_thermal.units import kelvin_to_celsius
 
@@ -42,6 +43,7 @@ __all__ = [
     "albedo_heat_w_at_time",
     "albedo_heating",
     "analytical_equilibrium_temperature",
+    "baseline_case",
     "earth_infrared_heat_w",
     "earth_infrared_heating",
     "earth_view_factor",
@@ -51,6 +53,7 @@ __all__ = [
     "net_heat_w",
     "orbital_period_s",
     "radiative_cooling",
+    "run_sensitivity_study",
     "simulate_continuous_sunlight",
     "simulate_orbital_eclipse",
     "solar_flux_w_per_m2",
