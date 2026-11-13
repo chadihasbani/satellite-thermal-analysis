@@ -9,7 +9,8 @@ that balance and adds a circular low-Earth orbit. Direct solar heating is
 turned off only while a cylindrical Earth-shadow test says the satellite is
 in eclipse. Phase 3A optionally adds simplified Earth infrared heating.
 Phase 3B optionally adds angle-dependent Earth albedo. Phase 4 studies
-parameter sensitivity around the Phase 3B baseline. A GUI is still absent.
+parameter sensitivity around the Phase 3B baseline. Phase 5 adds a Streamlit
+GUI that calls the same verified solvers.
 
 ## Phase 1 — continuous sunlight
 
@@ -71,6 +72,7 @@ run_phase2.py                   Phase 2: five orbits and the eclipse plot
 run_phase3a.py                  Phase 3A: Phase 2 vs Earth-IR comparison
 run_phase3b.py                  Phase 3B: Earth IR vs Earth IR + albedo
 run_phase4.py                   Phase 4: parameter sensitivity study
+app.py                          Phase 5: Streamlit GUI
 satellite_thermal/
     parameters.py               Named thermal inputs, units, and validation
     validation.py               Shared numeric checks
@@ -86,6 +88,7 @@ satellite_thermal/
     comparison_plot.py          Phase comparison figures
     sensitivity.py              One-at-a-time sensitivity cases
     sensitivity_plot.py         Sensitivity group temperature plots
+    gui_support.py              GUI input assembly and figure helper
     units.py                    Kelvin to Celsius for display
     plotting.py                 Phase 1 temperature-time figure
 tests/test_heat_transfer.py     Heat-rate and input checks
@@ -94,6 +97,7 @@ tests/test_orbit.py             Period, shadow geometry, and eclipse heating
 tests/test_earth_infrared.py    Earth IR heating and compatibility checks
 tests/test_albedo.py            Albedo heating and compatibility checks
 tests/test_sensitivity.py       Sensitivity study checks
+tests/test_gui_support.py       GUI wiring checks
 requirements.txt
 ```
 
@@ -136,6 +140,14 @@ python run_phase4.py
 prints the sensitivity table and writes
 `outputs/phase4_absorptivity.png`, `outputs/phase4_emissivity.png`, and
 `outputs/phase4_internal_power.png`.
+
+```text
+python -m streamlit run app.py
+```
+
+opens the Phase 5 GUI in a browser. Defaults match the Phase 3B teaching
+baseline. The default time step is 5 s for interactive use; set 1 s to match
+the CLI studies.
 
 ```text
 python verify_phase1.py
@@ -542,3 +554,35 @@ Over this five-orbit window, the strongest drivers are:
 - Altitude changes period, eclipse fraction, and Earth view factor together.
 - Plots shade baseline eclipse intervals; altitude cases have slightly different timing.
 - No claim of accuracy for real SAR satellites.
+
+## Phase 5 — Streamlit GUI
+
+Phase 5 adds an interactive browser UI in `app.py`. The GUI collects inputs and
+calls `simulate_orbital_eclipse` through `satellite_thermal/gui_support.py`.
+It does **not** re-implement the energy balance.
+
+### Features
+
+- Adjust mass, `cp`, optical properties, areas, internal power, and initial T
+- Set altitude, orbit count, and time step
+- Toggle Earth IR and albedo
+- Run one case and view min / max / final temperatures
+- Temperature-time plot with eclipse shading
+- Kirchhoff pairing: `alpha_ir` is set equal to `epsilon`
+
+### How to run
+
+```text
+python -m pip install -r requirements.txt
+python -m streamlit run app.py
+```
+
+Defaults match the Phase 3B teaching baseline. The GUI default time step is
+5 s for faster interaction. Use 1 s if you want closer agreement with the CLI
+five-orbit studies.
+
+### Limitations
+
+- Single-run only. Phase 4 sensitivity sweeps remain in `run_phase4.py`.
+- Local Streamlit app; nothing is published online.
+- Still a teaching model, not flight software.
