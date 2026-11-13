@@ -371,6 +371,16 @@ def run_environment_comparison_mode(request: GuiRunRequest) -> CompletedGuiStudy
     )
 
 
+def _pyplot():
+    """Import pyplot with a headless-safe backend (Streamlit Community Cloud)."""
+    import matplotlib
+
+    matplotlib.use("Agg", force=False)
+    import matplotlib.pyplot as plt
+
+    return plt
+
+
 def _configure_plot_style(plt) -> None:
     plt.rcParams.update(
         {
@@ -416,9 +426,9 @@ def make_gui_temperature_figure(
     label: str = "Temperature",
 ):
     """Build a Matplotlib figure for Streamlit display."""
-    import matplotlib.pyplot as plt
     from matplotlib.patches import Patch
 
+    plt = _pyplot()
     _configure_plot_style(plt)
     time_min = [second / 60.0 for second in result.time_s]
     temp_c = [kelvin_to_celsius(temp_k) for temp_k in result.temperature_k]
@@ -474,11 +484,11 @@ def make_comparison_temperature_figure(
     shade_from: NamedResult | None = None,
 ):
     """Plot several histories. Eclipse shading uses shade_from (or first curve)."""
-    import matplotlib.pyplot as plt
     from matplotlib.patches import Patch
 
     if not curves:
         raise ValueError("At least one curve is required.")
+    plt = _pyplot()
     _configure_plot_style(plt)
     colors = ["#1D1D1F", "#0071E3", "#FF9500", "#5856D6"]
     styles = ["-", "--", "-.", ":"]
@@ -555,8 +565,7 @@ def make_comparison_temperature_figure(
 
 def make_heat_flow_bar_figure(snapshot) -> object:
     """Horizontal bar chart of instantaneous heat flows."""
-    import matplotlib.pyplot as plt
-
+    plt = _pyplot()
     _configure_plot_style(plt)
     labels = [
         "Solar heating",
@@ -615,13 +624,16 @@ def temperature_history_csv(curves: tuple[NamedResult, ...]) -> str:
 
 
 def figure_to_png_bytes(figure) -> bytes:
-    """Serialize a Matplotlib figure to PNG bytes for download."""
+    """Serialize a Matplotlib figure to PNG bytes for download (no disk writes)."""
     from io import BytesIO
 
+    plt = _pyplot()
     buffer = BytesIO()
     figure.savefig(buffer, format="png", dpi=160, bbox_inches="tight")
     buffer.seek(0)
-    return buffer.getvalue()
+    png = buffer.getvalue()
+    plt.close(figure)
+    return png
 
 
 def _csv_escape(value: str) -> str:

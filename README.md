@@ -3,6 +3,17 @@
 Single-node thermal analysis of a spacecraft in low Earth orbit (LEO), with a
 Streamlit GUI for interactive exploration.
 
+## Live application
+
+Once the app is deployed on **Streamlit Community Cloud**, open the public URL
+from your Streamlit dashboard (typical form:
+`https://<app-name>.streamlit.app`). Anyone can use the simulator in a browser
+with no Python install.
+
+Until that URL is published, run locally as below.
+
+## Run locally
+
 ```bash
 python -m pip install -r requirements.txt
 python -m streamlit run app.py
@@ -86,12 +97,7 @@ click **Run simulation**.
 
 ## 5. Install and run
 
-```bash
-python -m pip install -r requirements.txt
-python -m streamlit run app.py
-```
-
-Optional CLI studies (from the repository root):
+See **Run locally** above. Optional CLI studies (from the repository root):
 
 ```bash
 python scripts/run_phase1.py
