@@ -5,12 +5,13 @@ Streamlit GUI for interactive exploration.
 
 ## Live application
 
-Once the app is deployed on **Streamlit Community Cloud**, open the public URL
-from your Streamlit dashboard (typical form:
-`https://<app-name>.streamlit.app`). Anyone can use the simulator in a browser
-with no Python install.
+Use the simulator in a browser (no Python install):
 
-Until that URL is published, run locally as below.
+**https://satellite-thermal-analysis.streamlit.app**
+
+Hosted on Streamlit Community Cloud. Defaults are ready — click **Run Simulation**.
+
+To run on your own machine instead:
 
 ## Run locally
 
