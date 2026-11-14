@@ -172,26 +172,73 @@ def _atmosphere_mesh(radius_m: float, n_lat: int = 48, n_lon: int = 96):
     return xs, ys, zs, i_idx, j_idx, k_idx, colors
 
 
+def _orthonormal_basis_from_axis(
+    axis: tuple[float, float, float],
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    """Two unit vectors spanning the plane perpendicular to ``axis``."""
+    ax, ay, az = axis
+    # Prefer a reference that is not nearly parallel to the cylinder axis.
+    if abs(ax) < 0.9:
+        ref = (1.0, 0.0, 0.0)
+    else:
+        ref = (0.0, 1.0, 0.0)
+    ux = ay * ref[2] - az * ref[1]
+    uy = az * ref[0] - ax * ref[2]
+    uz = ax * ref[1] - ay * ref[0]
+    u_mag = math.sqrt(ux * ux + uy * uy + uz * uz)
+    if u_mag == 0.0:
+        raise ValueError("axis must be a non-zero vector.")
+    u = (ux / u_mag, uy / u_mag, uz / u_mag)
+    vx = ay * u[2] - az * u[1]
+    vy = az * u[0] - ax * u[2]
+    vz = ax * u[1] - ay * u[0]
+    v_mag = math.sqrt(vx * vx + vy * vy + vz * vz)
+    v = (vx / v_mag, vy / v_mag, vz / v_mag)
+    return u, v
+
+
 def _shadow_cylinder_mesh(
     earth_radius_m: float,
     length_m: float,
+    sun_direction_vector: tuple[float, float, float] = (1.0, 0.0, 0.0),
     n_theta: int = 28,
     n_axial: int = 12,
 ):
-    """Cylinder along -X (anti-sun for beta = 0) representing the umbra."""
+    """Cylinder of radius Earth along -s (anti-sun), matching the umbra test."""
+    sx, sy, sz = sun_direction_vector
+    s_mag = math.sqrt(sx * sx + sy * sy + sz * sz)
+    if s_mag == 0.0:
+        raise ValueError("sun_direction_vector must be non-zero.")
+    sun = (sx / s_mag, sy / s_mag, sz / s_mag)
+    axis = (-sun[0], -sun[1], -sun[2])
+    u, v = _orthonormal_basis_from_axis(axis)
     xs: list[list[float]] = []
     ys: list[list[float]] = []
     zs: list[list[float]] = []
     for i in range(n_axial + 1):
-        x = -length_m * i / n_axial
+        along = length_m * i / n_axial
         row_x: list[float] = []
         row_y: list[float] = []
         row_z: list[float] = []
         for j in range(n_theta + 1):
             ang = 2.0 * math.pi * j / n_theta
-            row_x.append(x)
-            row_y.append(earth_radius_m * math.cos(ang))
-            row_z.append(earth_radius_m * math.sin(ang))
+            cos_a = math.cos(ang)
+            sin_a = math.sin(ang)
+            px = (
+                axis[0] * along
+                + earth_radius_m * (cos_a * u[0] + sin_a * v[0])
+            )
+            py = (
+                axis[1] * along
+                + earth_radius_m * (cos_a * u[1] + sin_a * v[1])
+            )
+            pz = (
+                axis[2] * along
+                + earth_radius_m * (cos_a * u[2] + sin_a * v[2])
+            )
+            row_x.append(px)
+            row_y.append(py)
+            row_z.append(pz)
         xs.append(row_x)
         ys.append(row_y)
         zs.append(row_z)
@@ -416,8 +463,12 @@ def build_orbit_3d_figure(
     status = "ECLIPSE" if eclipsed else "SUNLIT"
 
     shadow_x, shadow_y, shadow_z = _shadow_cylinder_mesh(
-        earth_r, length_m=2.2 * radius
+        earth_r, length_m=2.2 * radius, sun_direction_vector=sun
     )
+    sun_arrow_scale = 1.55 * radius
+    sun_line_x = [0.0, sun[0] * sun_arrow_scale]
+    sun_line_y = [0.0, sun[1] * sun_arrow_scale]
+    sun_line_z = [0.0, sun[2] * sun_arrow_scale]
     map_mtime = (
         _EARTH_MAP_PATH.stat().st_mtime_ns if _EARTH_MAP_PATH.is_file() else 0
     )
@@ -514,6 +565,21 @@ def build_orbit_3d_figure(
             line={"color": "#64D2FF", "width": 3},
             name="Orbit",
             hoverinfo="skip",
+        )
+    )
+    figure.add_trace(
+        go.Scatter3d(
+            x=sun_line_x,
+            y=sun_line_y,
+            z=sun_line_z,
+            mode="lines+markers",
+            line={"color": "#FFD60A", "width": 5},
+            marker={"size": [0, 5], "color": "#FFD60A"},
+            name="Sun direction",
+            hovertemplate=(
+                f"β = {math.degrees(settings.beta_rad):.1f}°"
+                "<extra>Sun direction</extra>"
+            ),
         )
     )
     # Visual scale is exaggerated so the craft is readable next to Earth.

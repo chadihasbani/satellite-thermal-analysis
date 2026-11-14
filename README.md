@@ -63,7 +63,8 @@ Q_radiated  = ε · σ · A_radiating · T⁴
 ```
 
 Orbit period uses a circular Keplerian formula. Eclipse uses a cylindrical
-Earth-shadow test at beta = 0. Time integration is **explicit Euler**.
+Earth-shadow test with selectable orbital beta angle (default β = 0° preserves
+the Version 1.0 reference). Time integration is **explicit Euler**.
 
 Full detail: [`docs/MODEL.md`](docs/MODEL.md).
 
@@ -73,7 +74,7 @@ Full detail: [`docs/MODEL.md`](docs/MODEL.md).
 
 | Group | Examples |
 | --- | --- |
-| Orbit / numerics | altitude, orbit count, time step |
+| Orbit / numerics | altitude, beta angle, orbit count, time step |
 | Thermal mass | mass, specific heat, initial temperature |
 | Optics | solar absorptivity α, IR emissivity ε |
 | Areas | projected, radiating, Earth-facing, albedo areas |
@@ -136,7 +137,9 @@ validation against flight hardware.
 - One isothermal node (no multi-node conduction network)
 - Effective areas are inputs, not CAD geometry
 - Emission is to a 0 K sink; Earth IR / albedo are added as separate loads
-- Cylindrical shadow, beta = 0; no detailed attitude dynamics
+- Cylindrical shadow with variable beta (affects eclipse timing); solar heating
+  still uses a fixed projected area until the planned attitude-dependent upgrade
+- No detailed attitude dynamics
 - 3D craft is illustrative and enlarged for visibility
 - Not flight software; not endorsed by NASA, ESA, or any manufacturer
 
@@ -147,6 +150,7 @@ validation against flight hardware.
 | Document | Contents |
 | --- | --- |
 | [`docs/MODEL.md`](docs/MODEL.md) | Equations, assumptions, phase history, verification numbers |
+| [`docs/SOURCE_TRACEABILITY.md`](docs/SOURCE_TRACEABILITY.md) | Parameter / equation source register |
 | [`docs/REFERENCES.md`](docs/REFERENCES.md) | Public engineering references and claim boundaries |
 | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | Repository conventions and AI-assisted development notes |
 

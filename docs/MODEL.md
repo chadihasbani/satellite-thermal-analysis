@@ -187,9 +187,11 @@ plane:
 s = (cos(beta), 0, sin(beta))
 ```
 
-Phase 2 uses `beta = 0`, so the Sun is `+X` and lies in the orbital plane.
-Position angle `theta` is measured from the sunward axis. The run starts at
-`theta = 0`, which is the sun-facing side, above the subsolar point:
+The Version 1.0 / default GUI case uses `beta = 0`, so the Sun is `+X` and
+lies in the orbital plane. The GUI now allows other beta values; the same
+Sun-vector and cylindrical-shadow definitions apply. Position angle `theta`
+is measured from the sunward axis. The run starts at `theta = 0`, which is
+the sun-facing side, above the subsolar point when beta = 0:
 
 ```text
 theta(t) = 2 * pi * t / T_orbit
@@ -204,6 +206,7 @@ mu = 3.986004418e14 m³/s²
 ```
 
 `T_orbit` is in seconds. With these inputs it is **5668.1444 s (94.4691 min)**.
+The period does not depend on beta.
 
 Eclipse is not a stored number of minutes. A position is in shadow when it is
 on the night side of the terminator plane and inside a cylinder of radius
@@ -214,9 +217,41 @@ r_vec · s_hat < 0
 |r_vec × s_hat| <= R_earth
 ```
 
-For this beta = 0 circle, that condition is true for an angle
-`2 * asin(R_earth / r)` centered on the anti-sun point. The corresponding
-duration is
+With the frame above,
+
+```text
+|r_vec × s| = r * sqrt(sin²(beta) + sin²(theta) * cos²(beta))
+```
+
+At the anti-sun point (`theta = pi`) the perpendicular distance to the umbra
+axis is `r |sin(beta)|`. Eclipse is therefore possible only when
+
+```text
+|beta| <= beta_critical = asin(R_earth / r) ≈ 68.007° at 500 km
+```
+
+**Classification:** derived geometric result (D) from the cylindrical-shadow
+definition; not `acos(R_earth / r)` (that complementary angle is ≈ 21.99° and
+is not the critical beta). For authoritative thermal-engineering discussion of
+beta and cylindrical-umbra eclipse, see Rickman, TFAWS 2023 *Introduction to
+On-Orbit Thermal Environments* (cylindrical-shadow simplification stated;
+eclipse onset from the projected-radius condition). The closed-form duration
+below is this project's derivation from the same cylinder test implemented in
+code.
+
+For `|beta| < beta_critical`,
+
+```text
+kappa = sqrt( ((R_earth/r)² - sin²(beta)) / cos²(beta) )
+t_eclipse = (T_orbit / pi) * asin(kappa)
+```
+
+At `|beta| = beta_critical` the orbit is tangent to the cylinder at one
+anti-sun point (measure-zero contact). Analytical duration is reported as 0.
+The discrete test still counts that tangent sample because `<=` includes the
+boundary. For `|beta| > beta_critical` there is continuous sunlight.
+
+At beta = 0 this reduces to
 
 ```text
 t_eclipse = T_orbit * asin(R_earth / r) / pi = 2141.523 s (35.692 min)
@@ -228,13 +263,21 @@ when the test is true at the start of the step. That sampling gives
 | Quantity | Value |
 | --- | --- |
 | Orbital period | 5668.1444 s (94.4691 min) |
-| Eclipse per orbit | 2141.0000 s (35.6833 min) |
-| Sunlight per orbit | 3527.1444 s (58.7857 min) |
+| Eclipse per orbit (β = 0°) | 2141.0000 s (35.6833 min) |
+| Sunlight per orbit (β = 0°) | 3527.1444 s (58.7857 min) |
 
 The 0.523 s difference from the closed-form eclipse is the 1 s sampling of
-the entry and exit. Eclipse plus sunlight equals one period. About 36 minutes
-of eclipse in a 94.5-minute low-Earth orbit is the expected result for a
-cylindrical shadow at beta = 0.
+the entry and exit. Eclipse plus sunlight equals one period.
+
+### Beta verification table (500 km, dt = 1 s)
+
+| β (°) | Analytical eclipse (min) | Numerical eclipse (min) | Notes |
+| --- | --- | --- | --- |
+| 0 | 35.692 | 35.683 | V1 reference |
+| ±30 | 33.788 | 33.783 | ±β identical |
+| 60 | 21.779 | 21.783 | shorter eclipse |
+| 68 | 0.746 | 0.750 | just below critical ≈ 68.007° |
+| 75 | 0.000 | 0.000 | continuous sunlight |
 
 ### Thermal coupling
 
@@ -267,16 +310,23 @@ This is a simplified transient model result, not a flight prediction.
 
 ### Assumptions and limitations
 
-- The orbit is circular. Altitude, beta, and the solar direction do not change.
+- The orbit is circular. Altitude and beta are constant over a run; the Sun
+  direction is fixed in the simulation inertial frame.
 - Earth is a smooth sphere. There is no atmosphere, refraction, or penumbra,
   so the shadow edge is sharp.
-- Beta = 0 gives the longest eclipse for this altitude. A nonzero beta would
-  shorten it, and a high enough beta would remove it. Phase 2 does not sweep
-  beta.
-- Projected area does not change with attitude. The satellite is still one
-  isothermal node.
+- Beta = 0 gives the longest eclipse for this altitude. Eclipse shortens as
+  `|beta|` increases and vanishes for `|beta| >= asin(R_earth / r)`.
+- **Beta changes eclipse exposure (and Sun direction in the 3D view).** It does
+  **not** yet change the solar projected area. Direct solar heating still uses
+  the fixed input `A_projected` whenever the satellite is sunlit. Orientation-
+  dependent face solar absorption is reserved for Checkpoint 2 / Version 2.0
+  enhanced mode.
+- The satellite is still one isothermal node.
 - Eclipse duration reported by the 1 s run is the sampled shadow test, so it
-  can differ from `asin(R/r)` by less than one step.
+  can differ from the closed-form duration by about one step.
+- Earth IR remains a constant effective-area load; albedo still uses the
+  in-plane angle factor. Variable beta does not yet make planetary heating
+  attitude- or beta-dependent beyond the shared eclipse gate for albedo.
 - Phase 2 itself still leaves Earth infrared off. Phase 3A adds that load
   optionally. Albedo remains reserved for a later phase.
 - The Phase 1 continuous-sunlight case remains `python scripts/run_phase1.py`.

@@ -45,7 +45,20 @@ Used for small-spacecraft thermal-control context and terminology.
 
 Used for orbital / eclipse thinking relevant to thermal engineers (beta angle,
 sunlight/eclipse, attitude effects). This code uses a simplified circular orbit
-and cylindrical shadow at beta = 0.
+and cylindrical shadow with selectable beta (default 0 for the V1 reference).
+
+### 3b. Rickman — Introduction to On-Orbit Thermal Environments (TFAWS 2023)
+
+- https://tfaws.nasa.gov/wp-content/uploads/16.On-Orbit-Thermal-Environments-TFAWS-2023_SRickman.pdf
+- Accessed for Checkpoint 1 documentation.
+
+Defines beta as the angle between the solar vector and the orbital plane,
+discusses eclipse/umbra including a cylindrical-shadow simplification, and
+shows that eclipse fraction falls with rising `|β|` and vanishes above a
+critical high-beta regime for a given altitude. The project's
+`β_c = asin(R_E/r)` and closed-form eclipse duration are independently
+derived from the cylinder test implemented in code (see
+`docs/SOURCE_TRACEABILITY.md` and `docs/MODEL.md`).
 
 ### 4. Thermal analysis and control of small satellites in low Earth orbit
 

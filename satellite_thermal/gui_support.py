@@ -44,6 +44,7 @@ class GuiRunRequest:
     earth_olr_w_per_m2: float
     earth_bond_albedo: float
     altitude_km: float
+    beta_deg: float
     orbit_count: int
     time_step_s: float
     include_earth_infrared: bool
@@ -67,6 +68,7 @@ def default_gui_request() -> GuiRunRequest:
         earth_olr_w_per_m2=240.0,
         earth_bond_albedo=0.30,
         altitude_km=500.0,
+        beta_deg=0.0,
         orbit_count=5,
         time_step_s=5.0,
         include_earth_infrared=True,
@@ -95,7 +97,10 @@ def build_model_inputs(request: GuiRunRequest) -> tuple[
         radiating_area_m2=request.radiating_area_m2,
         internal_heat_w=request.internal_heat_w,
     ).validated()
-    orbit = CircularOrbit(altitude_m=request.altitude_km * 1000.0).validated()
+    orbit = CircularOrbit(
+        altitude_m=request.altitude_km * 1000.0,
+        beta_rad=math.radians(request.beta_deg),
+    ).validated()
     earth_ir = EarthInfraredParameters(
         earth_olr_w_per_m2=request.earth_olr_w_per_m2,
         earth_facing_area_m2=request.earth_facing_area_m2,
@@ -156,9 +161,14 @@ def validate_gui_request(request: GuiRunRequest) -> GuiRunRequest:
         raise ValueError("earth_olr_w_per_m2 must be >= 0.")
     if request.altitude_km <= 0.0:
         raise ValueError("altitude_km must be greater than 0.")
+    if abs(request.beta_deg) > 90.0:
+        raise ValueError("beta_deg must be between -90 and 90 degrees.")
 
     # Estimate sample count using the same orbit helper the solver uses.
-    orbit = CircularOrbit(altitude_m=request.altitude_km * 1000.0).validated()
+    orbit = CircularOrbit(
+        altitude_m=request.altitude_km * 1000.0,
+        beta_rad=math.radians(request.beta_deg),
+    ).validated()
     duration_s = request.orbit_count * orbital_period_s(orbit)
     estimated_samples = int(duration_s / request.time_step_s) + 1
     if estimated_samples > MAX_GUI_SAMPLES:
@@ -249,6 +259,7 @@ _PARAMETER_LABELS = {
     "earth_olr_w_per_m2": "Earth OLR E_olr (W/m²)",
     "earth_bond_albedo": "Earth Bond albedo a",
     "altitude_km": "Altitude (km)",
+    "beta_deg": "Orbital beta angle (°)",
     "orbit_count": "Number of orbits",
     "time_step_s": "Time step (s)",
     "include_earth_infrared": "Include Earth IR",

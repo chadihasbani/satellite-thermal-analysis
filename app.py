@@ -232,7 +232,13 @@ TERM_HELP = {
     ),
     "eclipse": (
         "Eclipse: portion of an orbit when Earth blocks direct sunlight from "
-        "reaching the spacecraft."
+        "reaching the spacecraft (cylindrical umbra; duration depends on beta)."
+    ),
+    "beta": (
+        "Beta angle: angle between the Sun direction and the orbital plane. "
+        "β = 0° is the Version 1.0 reference. Above the critical beta "
+        "(asin(R_E/r) ≈ 68° at 500 km) the orbit stays in continuous sunlight "
+        "under the cylindrical-shadow model."
     ),
 }
 
@@ -301,6 +307,7 @@ def _request_from_state() -> GuiRunRequest:
         earth_olr_w_per_m2=float(st.session_state.gui_earth_olr_w_per_m2),
         earth_bond_albedo=float(st.session_state.gui_earth_bond_albedo),
         altitude_km=float(st.session_state.gui_altitude_km),
+        beta_deg=float(st.session_state.gui_beta_deg),
         orbit_count=int(st.session_state.gui_orbit_count),
         time_step_s=float(st.session_state.gui_time_step_s),
         include_earth_infrared=bool(st.session_state.gui_include_earth_infrared),
@@ -397,6 +404,14 @@ with st.sidebar:
         max_value=2000.0,
         step=50.0,
         key="gui_altitude_km",
+    )
+    st.slider(
+        "Orbital beta angle β (°)",
+        min_value=-90.0,
+        max_value=90.0,
+        step=1.0,
+        key="gui_beta_deg",
+        help=TERM_HELP["beta"],
     )
 
     st.markdown("#### Spacecraft")
@@ -632,7 +647,7 @@ status_now = "Eclipsed" if primary.result.in_eclipse[sample_index] else "Sunlit"
 st.caption(
     f"Selected time: {times_min[sample_index]:.2f} min · "
     f"orbit {orbit_number_primary:.2f} of {primary.request.orbit_count} · "
-    f"{status_now}"
+    f"{status_now} · β = {primary.request.beta_deg:.1f}°"
 )
 
 if len(curves) > 1:
@@ -832,7 +847,7 @@ with detail_tabs[1]:
 - {TERM_HELP["single_node"]}
 - Areas are model inputs, not CAD surfaces.
 - Emission uses `εσAT⁴` to a 0 K sink; Earth IR and albedo are separate loads.
-- {TERM_HELP["eclipse"]} (cylindrical shadow, beta = 0).
+- {TERM_HELP["eclipse"]} {TERM_HELP["beta"]}
 - 3D craft geometry is illustrative and enlarged; attitude is not simulated.
 - Results are numerical / equation consistency checks — not flight-data validation.
 - Sidebar edits do not erase results; a new solve runs only on **Run Simulation**.
