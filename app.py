@@ -301,7 +301,7 @@ TERM_HELP = {
 
 MODE_LABELS = {
     "single": "Single Simulation",
-    "baseline_compare": "Compare Spacecraft Settings",
+    "baseline_compare": "Compare to Reference Defaults",
     "environment_compare": "Compare Environmental Heating",
     "scenario_compare": "Compare Hot / Nominal / Cold",
 }
@@ -356,8 +356,10 @@ def _mode_blurb(mode: str) -> str:
             "and thermal parameters."
         ),
         "baseline_compare": (
-            "Compare the default spacecraft with your modified settings to see "
-            "how changes in its properties or operating conditions affect temperature."
+            "Compare repository reference defaults (same orbit count and time "
+            "step) with your modified run. Differences may include spacecraft "
+            "properties, orbit, attitude, power, or environment — not only the "
+            "bus geometry."
         ),
         "environment_compare": (
             "Compare the same spacecraft with progressively more environmental "
@@ -483,9 +485,11 @@ with st.sidebar:
     st.caption(_mode_blurb(mode))
     if mode == "baseline_compare":
         st.caption(
-            "Reference = established defaults (same orbits and time step). "
-            "Modified = your settings (with any selected scenario overlay). "
-            "Identical settings produce overlapping curves."
+            "Reference = repository defaults (same orbits and time step). "
+            "Modified = your settings, including any spacecraft-configuration "
+            "or thermal-scenario overlays. This mode can differ in orbit and "
+            "operations as well as spacecraft properties. Identical settings "
+            "produce overlapping curves."
         )
     elif mode == "environment_compare":
         st.caption(

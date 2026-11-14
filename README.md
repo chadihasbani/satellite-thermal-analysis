@@ -38,11 +38,22 @@ circular LEO orbits, including:
 - direct solar heating (off in eclipse)
 - Earth infrared (planetshine)
 - Earth albedo (off in eclipse)
-- constant internal dissipation
+- internal dissipation (constant or scheduled)
 - radiative cooling to space
 
-It can also compare a modified case to the default reference case, or compare
-three heating stacks (solar+internal → +Earth IR → +albedo).
+**Version 2.0** adds orbital beta angle, attitude-dependent face solar heating
+(enhanced mode), time-dependent internal power, Hot/Nominal/Cold screening
+presets, and CubeSat-inspired bus configurations — while keeping the Version 1.0
+legacy fixed-area path as the default educational baseline.
+
+Simulation modes:
+
+| Mode | Purpose |
+| --- | --- |
+| Single Simulation | One configured run |
+| Compare to Reference Defaults | Your settings vs repository defaults (same orbits / time step) |
+| Compare Environmental Heating | Solar+internal → +Earth IR → +albedo stack |
+| Compare Hot / Nominal / Cold | Three screening overlays on one spacecraft setup |
 
 ---
 
@@ -55,26 +66,19 @@ m · cp · dT/dt = Q_solar + Q_earth_ir + Q_albedo + Q_internal − Q_radiated
 with
 
 ```text
-Q_solar     = α · A_projected · S          (S = 0 in eclipse)
+Q_solar     = α · A_projected · S          (legacy; S = 0 in eclipse)
+            = Σ α_i S A_i max(0, n_i·s)  (enhanced faces)
 Q_earth_ir  = α_ir · A_earth · F_earth · E_olr
 Q_albedo    = α · A_albedo · F_earth · max(cos θ, 0) · a · S
-Q_radiated  = ε · σ · A_radiating · T⁴
+Q_radiated  = ε · σ · A_radiating · T⁴   (legacy)
+            = Σ ε_i σ A_i T⁴             (enhanced faces)
 α_ir        = ε   (Kirchhoff pairing in this model)
 ```
 
 Orbit period uses a circular Keplerian formula. Eclipse uses a cylindrical
-Earth-shadow test with selectable orbital beta angle (default β = 0° preserves
-the Version 1.0 reference). An optional **enhanced** thermal mode replaces the
-fixed solar projected area with six bus-face contributions under a prescribed
-attitude; legacy fixed-area mode remains the default. Internal heat may be
-constant (Version 1.0 default) or follow illustrative time-dependent schedules
-(eclipse-reduced, periodic high-power, or custom intervals). Optional
-**Nominal / Hot / Cold** screening presets adjust environmental fluxes, beta,
-and constant internal power using a documented NASA GD-AP-2301 pairing for
-Hot/Cold (Nominal keeps Version 1.0 educational defaults). Time integration is
-**explicit Euler**.
-
-Full detail: [`docs/MODEL.md`](docs/MODEL.md).
+Earth-shadow test with selectable orbital beta (default β = 0° preserves the
+Version 1.0 reference). Time integration is **explicit Euler**. Equations,
+assumptions, and checkpoint history: [`docs/MODEL.md`](docs/MODEL.md).
 
 ---
 
@@ -93,7 +97,6 @@ Full detail: [`docs/MODEL.md`](docs/MODEL.md).
 | Optics | solar absorptivity α, IR emissivity ε |
 | Areas | projected, radiating, Earth-facing, albedo areas (legacy / planetary) |
 | Environment | solar flux, Earth OLR, Bond albedo, Earth IR / albedo flags |
-| Modes | single run, reference comparison, environmental heating stack, Hot/Nominal/Cold compare |
 
 ---
 
@@ -101,13 +104,14 @@ Full detail: [`docs/MODEL.md`](docs/MODEL.md).
 
 - Summary temperature metrics
 - Temperature history (eclipse shading)
-- Synchronized 3D orbit view (illustrative spacecraft body)
+- Synchronized 3D orbit view (illustrative bus; solar wings labelled visual-only)
 - Instantaneous heat-flow values and chart
 - Comparison tables and export (CSV / PNG)
 
-Temperature plot, 3D position, and heat-flow panel follow the same time slider.
-Editing sidebar inputs does **not** auto-rerun; results update only when you
-click **Run simulation**.
+Temperature plot, 3D position, and heat-flow panel follow the same sample-index
+control (works with irregular timestamps from power-event splits). Editing
+sidebar inputs does **not** auto-rerun; results update only when you click
+**Run simulation**.
 
 ---
 
@@ -133,29 +137,25 @@ python scripts/verify_phase3b_convergence.py
 python -m unittest discover -s tests -v
 ```
 
-Checks include:
-
-- analytical equilibrium for continuous sunlight
-- eclipse geometry / duration consistency
-- Earth IR and albedo heating identities
-- GUI mode packaging and 3D position sync helpers
-- orbital time-step convergence for the default LEO case with Earth IR + albedo
+Checks include analytical equilibrium, eclipse geometry, Earth IR / albedo
+identities, GUI packaging, 3D sync helpers, discrete Euler energy accounting,
+integrated V2 feature cases, and time-step studies. Details and source
+classifications: [`docs/SOURCE_TRACEABILITY.md`](docs/SOURCE_TRACEABILITY.md).
 
 This is **numerical / equation consistency verification**, not experimental
-validation against flight hardware.
+or flight-data validation.
 
 ---
 
 ## 7. Model limitations
 
 - One isothermal node (no multi-node conduction network)
-- Effective areas are inputs, not CAD geometry
-- Emission is to a 0 K sink; Earth IR / albedo are added as separate loads
-- Cylindrical shadow with variable beta (affects eclipse timing)
-- Legacy mode: fixed projected area; enhanced mode: face-based solar with
-  prescribed attitudes (not closed-loop ACS)
-- Earth IR / albedo remain effective-area loads; 3D wing panels are visual-only
-- 3D craft is illustrative and enlarged for visibility
+- Idealized rectangular bus / effective areas — not CAD or flight hardware
+- Emission to a 0 K sink; Earth IR / albedo are separate effective-area loads
+- Cylindrical shadow; no penumbra; eclipse edges are step-sampled
+- Prescribed attitudes only (not closed-loop ACS)
+- 3D wing panels / dish details are visual-only (not thermal faces)
+- Educational screening presets — not mission-qualified worst cases
 - Not flight software; not endorsed by NASA, ESA, or any manufacturer
 
 ---
@@ -164,8 +164,9 @@ validation against flight hardware.
 
 | Document | Contents |
 | --- | --- |
-| [`docs/MODEL.md`](docs/MODEL.md) | Equations, assumptions, phase history, verification numbers |
-| [`docs/SOURCE_TRACEABILITY.md`](docs/SOURCE_TRACEABILITY.md) | Parameter / equation source register |
+| [`docs/MODEL.md`](docs/MODEL.md) | Equations, assumptions, checkpoint history, verification notes |
+| [`docs/SOURCE_TRACEABILITY.md`](docs/SOURCE_TRACEABILITY.md) | Parameter / equation source register and audit table |
+| [`docs/CHECKPOINT6_VERIFICATION.md`](docs/CHECKPOINT6_VERIFICATION.md) | Checkpoint 6 integrated case metrics and suite notes |
 | [`docs/REFERENCES.md`](docs/REFERENCES.md) | Public engineering references and claim boundaries |
 | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | Repository conventions and AI-assisted development notes |
 

@@ -100,13 +100,41 @@ NASA/ESA endorsement or experimental validation of the software.
 - Spacecraft-preset GUI fields lock/sync; Custom is identity; scenario-compare shares one bus across Cold/Nominal/Hot.
 - Legacy simplified configuration still reproduces V1 A/B/C finals.
 
+### Checkpoint 6 (integration / release readiness)
+
+- Integrated Cases A–E across beta, attitude, schedules, scenarios, and 3U geometry (`tests/test_checkpoint6_integration.py`).
+- Discrete Euler energy identity: `Σ(Q_net Δt) = m cp ΔT` to floating-point tolerance using step-start heat flows (numerical consistency, not flight validation).
+- Independent rebuilds of period, `β_c = asin(R_E/r)`, face areas, and projected-area bounds (not merely re-calling a single helper).
+- Time-step study: finals for `dt ∈ {10,5,2,1}` s stay within ~0.05 °C of the 1 s reference for the nominal 3U case; convergence is **non-monotonic** because eclipse edges remain step-sampled.
+- Legacy V1 A/B/C finals reproduced: −12.5661 / −6.8313 / −4.5386 °C.
+- GUI mode label clarified: “Compare to Reference Defaults” (orbit/ops may differ, not only spacecraft properties).
+- Claim boundary unchanged: **numerically verified educational model**, not flight-validated software.
+
+## Source-audit summary (Checkpoint 6)
+
+| Item | Code value | Doc agreement | Access / support note |
+| --- | --- | --- | --- |
+| `σ` | `5.670374419e-8` | Yes | CODATA 2018 class value (B) |
+| Default `S` | 1361 W/m² | Yes | Illustrative modern TSI scale (C); not mission-specific. Exact primary citation still soft — see REFERENCES |
+| GD-AP-2301 Hot/Cold `S`, `a`, OLR | 1422/0.35/EB; 1318/0.25/EB | Yes | **Re-accessed CP6** via GD-AP-2301 PDF: winter 1422 / summer 1318; hot/cold albedo 0.35/0.25; `E=(1−a)S/4` → Hot 231 / Cold 247 W/m² (Table 1 orbit-average). Applied here as constant loads (B→C use) |
+| Nominal repo `S`/`a`/`E_olr` | 1361 / 0.30 / 240 | Yes | Educational V1 continuity; **not** identical to GD-AP-2301 nominal 1367.5/0.30/239 |
+| `R_E`, `μ` | 6 371 000 m; `3.986004418e14` | Yes | Spherical-Earth / conventional GM (C/B) |
+| `β_c`, eclipse duration | `asin(R_E/r)`; closed-form κ | Yes | Derived (D); TFAWS supports beta/cylinder context |
+| CDS 1U/3U envelopes / max mass | 100×100×113.5 mm / 2 kg; 100×100×340.5 mm / 6 kg | Yes | **Re-accessed CP6** CDS Rev 14.1 PDF: Table 1 typical max masses 1U 2.00 / 3U 6.00 kg; Z envelopes 113.5 / 340.5 mm in drawings/history (B). Model masses 1.5/4.0 kg are illustrative (C) |
+| Effective `cp` | 900 J/(kg·K) | Yes | Lumped illustrative (C); not CDS |
+| Face solar / radiation | `α S A max(0,n·s)`; `ε σ A T⁴` sum | Yes | Principle (A) + Cottingham context (B) |
+| Internal schedules | 1/5/15 W levels; event splits | Yes | Illustrative (C); method (D) |
+
+**Access status (Checkpoint 6):** GD-AP-2301 Preferred Practice PDF and Cal Poly CDS Rev 14.1 PDF were re-fetched; Hot/Cold solar–albedo–OLR triples and CDS Table 1 max masses / envelope lengths match the code. TFAWS Rickman and Cottingham NTRS were not re-downloaded in this pass (prior checkpoint access notes in `docs/REFERENCES.md` stand). Default educational `S = 1361` remains an illustrative modern TSI-scale choice (C), not the GD-AP-2301 nominal 1367.5.
+
 ## Known limitations
 
 - Using a published beta/eclipse or solar-heating discussion does not validate this code as flight software.
 - Planetary IR/albedo geometry is still the V1 effective-area model.
 - Penumbra and finite Sun angular size are omitted.
 - Prescribed attitudes are not ACS dynamics; solar panels in the 3D view are not thermal faces.
-- Eclipse entry/exit for `eclipse_reduced` remain step-sampled (not power-event splits).
+- Eclipse entry/exit remain step-sampled (not power-event splits); power schedules *are* event-aware.
+- At β = 0°, fixed-inertial and sun-pointing can present the same constant projected area for the default body-axis convention, so their solar histories may match while nadir-pointing differs.
 - Interactive GUI runs refuse estimates above `MAX_GUI_SAMPLES`; scripts may pass a higher `max_samples` or omit it.
 - Hot/Cold presets are educational screening cases, not mission-qualified worst cases; they omit EOL optical degradation and ERBE time-constant pairing.
 - CubeSat-inspired presets are not operational satellites; the rectangular CDS envelope is an idealized radiating geometry, not exact exposed flight-hardware surfaces; tuna-can/deployable volume omitted; effective cp is lumped/illustrative.

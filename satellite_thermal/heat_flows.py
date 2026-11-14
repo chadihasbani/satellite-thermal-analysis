@@ -110,11 +110,10 @@ def heat_flow_at_index(
             settings.stefan_boltzmann_w_per_m2_k4,
         )
 
-    q_earth_ir = (
-        result.earth_infrared_heat_w if include_earth_infrared else 0.0
-    )
-    if include_earth_infrared and earth_infrared is not None:
-        q_earth_ir = result.earth_infrared_heat_w
+    # Earth IR is constant over a run; stored integrator value matches the
+    # discrete solution. `earth_infrared` is accepted for API compatibility.
+    _ = earth_infrared
+    q_earth_ir = result.earth_infrared_heat_w if include_earth_infrared else 0.0
     q_albedo = (
         albedo_heat_w_at_time(time_s, orbit_settings, settings, albedo)
         if include_albedo

@@ -832,3 +832,31 @@ Spacecraft presets lock and synchronize dimensions, mass, effective cp, optics,
 thermal-model kind, and related area fields so the sidebar cannot contradict
 the solver. Custom unlocks editing. Hot/Nominal/Cold scenario compare continues
 to share one spacecraft configuration across all three environmental cases.
+
+## Version 2.0 — Checkpoint 6: integration and numerical verification
+
+Checkpoint 6 does **not** add new physics. It combines Checkpoints 1–5 and
+checks consistency:
+
+- Integrated Cases A–E (generic 3U; β = 0° vs 75°; scheduled power; attitudes;
+  Hot/Nominal/Cold) in `tests/test_checkpoint6_integration.py`.
+- Discrete energy accounting for explicit Euler:
+  `Σ_i Q_net(t_i) (t_{i+1} − t_i) = m cp (T_final − T_initial)` when `Q_net`
+  is evaluated at the same step-start state the integrator uses. Agreement is
+  to floating-point tolerance. This verifies discrete conservation of the
+  numerical scheme — **not** experimental thermal accuracy.
+- Orbital geometry rebuilt independently (period, `β_c`, eclipse edges, face
+  areas, right-handed attitudes, sun-pointing singularity path).
+- Time-step study on a nominal 3U LEO case: final temperatures for
+  `dt = 10, 5, 2, 1` s remain within about 0.05 °C of the 1 s reference.
+  Differences are **non-monotonic** in `dt` because eclipse boundaries are
+  still sampled on the orbital grid (unlike power-schedule events). For the
+  stated educational model and default steps of a few seconds, that sensitivity
+  is acceptable and documented.
+- Legacy Version 1.0 environment stack finals remain
+  −12.5661 / −6.8313 / −4.5386 °C at 500 km, five orbits, `dt = 1` s.
+- GUI: “Compare to Reference Defaults” clarifies that the modified case may
+  change orbit and operations as well as spacecraft properties.
+
+See `docs/SOURCE_TRACEABILITY.md` (Checkpoint 6) for the source-audit table and
+claim boundaries.
