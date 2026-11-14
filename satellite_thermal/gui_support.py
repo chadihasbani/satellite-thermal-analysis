@@ -224,25 +224,41 @@ class CompletedGuiStudy:
     changed_fields: tuple[str, ...] = ()
 
 
+# Stable display names for environmental-heating cases (Mode 3).
+ENV_CASE_A = "A — No Earth Heating"
+ENV_CASE_B = "B — With Earth Infrared"
+ENV_CASE_C = "C — With Earth Infrared and Albedo"
+ENV_CASE_NAMES = (ENV_CASE_A, ENV_CASE_B, ENV_CASE_C)
+
+REF_CASE_NAME = "Reference"
+MOD_CASE_NAME = "Modified"
+SINGLE_CASE_NAME = "Single simulation"
+
 _PARAMETER_LABELS = {
-    "mass_kg": "mass",
-    "specific_heat_j_per_kg_k": "cp",
-    "initial_temperature_c": "initial T",
-    "absorptivity": "alpha",
-    "emissivity": "epsilon",
-    "projected_area_m2": "A_projected",
-    "radiating_area_m2": "A_radiating",
-    "earth_facing_area_m2": "A_earth",
-    "albedo_area_m2": "A_albedo",
-    "internal_heat_w": "Q_internal",
-    "solar_flux_w_per_m2": "S",
-    "earth_olr_w_per_m2": "E_olr",
-    "earth_bond_albedo": "Bond albedo",
-    "altitude_km": "altitude",
-    "orbit_count": "orbit count",
-    "time_step_s": "time step",
-    "include_earth_infrared": "Earth IR flag",
-    "include_albedo": "albedo flag",
+    "mass_kg": "Mass (kg)",
+    "specific_heat_j_per_kg_k": "Specific heat cp (J/(kg·K))",
+    "initial_temperature_c": "Initial temperature (°C)",
+    "absorptivity": "Solar absorptivity α",
+    "emissivity": "Infrared emissivity ε",
+    "projected_area_m2": "Projected solar area (m²)",
+    "radiating_area_m2": "Radiating area (m²)",
+    "earth_facing_area_m2": "Earth-facing area (m²)",
+    "albedo_area_m2": "Albedo area (m²)",
+    "internal_heat_w": "Internal power (W)",
+    "solar_flux_w_per_m2": "Solar flux S (W/m²)",
+    "earth_olr_w_per_m2": "Earth OLR E_olr (W/m²)",
+    "earth_bond_albedo": "Earth Bond albedo a",
+    "altitude_km": "Altitude (km)",
+    "orbit_count": "Number of orbits",
+    "time_step_s": "Time step (s)",
+    "include_earth_infrared": "Include Earth IR",
+    "include_albedo": "Include albedo",
+}
+
+_ENV_HEATING_LABELS = {
+    ENV_CASE_A: "No Earth heating",
+    ENV_CASE_B: "Earth infrared included",
+    ENV_CASE_C: "Earth infrared + albedo",
 }
 
 
@@ -262,7 +278,7 @@ def changed_parameter_rows(
     baseline: GuiRunRequest,
     modified: GuiRunRequest,
 ) -> list[dict[str, object]]:
-    """Rows for a baseline-vs-modified comparison table."""
+    """Rows for a reference-vs-modified comparison table."""
     rows: list[dict[str, object]] = []
     for field, label in _PARAMETER_LABELS.items():
         base_value = getattr(baseline, field)
@@ -271,7 +287,7 @@ def changed_parameter_rows(
             rows.append(
                 {
                     "Parameter": label,
-                    "Baseline": base_value,
+                    "Reference": base_value,
                     "Modified": mod_value,
                 }
             )
@@ -296,6 +312,79 @@ def comparison_metrics_rows(curves: tuple[NamedResult, ...]) -> list[dict[str, o
     return rows
 
 
+def environment_comparison_summary_rows(
+    curves: tuple[NamedResult, ...],
+) -> list[dict[str, object]]:
+    """Readable A/B/C final-temperature summary with incremental differences."""
+    if len(curves) != 3:
+        raise ValueError("Environment summary requires exactly three curves (A, B, C).")
+    finals = [temperature_metrics_c(curve.result)["final_c"] for curve in curves]
+    return [
+        {
+            "Case": curves[0].name,
+            "Environmental heating": _ENV_HEATING_LABELS.get(
+                curves[0].name, "No Earth heating"
+            ),
+            "Final temperature (°C)": round(finals[0], 2),
+            "Temperature change": "Reference",
+        },
+        {
+            "Case": curves[1].name,
+            "Environmental heating": _ENV_HEATING_LABELS.get(
+                curves[1].name, "Earth infrared included"
+            ),
+            "Final temperature (°C)": round(finals[1], 2),
+            "Temperature change": f"B − A = {finals[1] - finals[0]:+.2f} K",
+        },
+        {
+            "Case": curves[2].name,
+            "Environmental heating": _ENV_HEATING_LABELS.get(
+                curves[2].name, "Earth infrared + albedo"
+            ),
+            "Final temperature (°C)": round(finals[2], 2),
+            "Temperature change": f"C − B = {finals[2] - finals[1]:+.2f} K",
+        },
+    ]
+
+
+def environment_comparison_interpretation(curves: tuple[NamedResult, ...]) -> str:
+    """Short auto-generated interpretation of A/B/C final-temperature differences."""
+    if len(curves) != 3:
+        raise ValueError("Environment interpretation requires exactly three curves.")
+    finals = [temperature_metrics_c(curve.result)["final_c"] for curve in curves]
+    d_ba = finals[1] - finals[0]
+    d_cb = finals[2] - finals[1]
+    d_ca = finals[2] - finals[0]
+    return (
+        "Under the selected assumptions, including Earth infrared radiation "
+        f"changes the final spacecraft temperature by {d_ba:+.2f} K. "
+        f"Adding albedo produces a further change of {d_cb:+.2f} K "
+        f"(C − A = {d_ca:+.2f} K). These are model results, not measured "
+        "satellite temperatures."
+    )
+
+
+def default_inspect_curve_name(study: CompletedGuiStudy) -> str:
+    """Default case used for 3D / heat-flow inspection after a solve."""
+    if study.mode == "environment_compare":
+        return study.primary.name  # Case C
+    return study.primary.name
+
+
+def resolve_inspect_curve(
+    curves: tuple[NamedResult, ...],
+    selected_name: str | None,
+    default_name: str,
+) -> NamedResult:
+    """Pick an inspection curve without re-solving."""
+    by_name = {curve.name: curve for curve in curves}
+    if selected_name in by_name:
+        return by_name[selected_name]
+    if default_name in by_name:
+        return by_name[default_name]
+    return curves[-1]
+
+
 def run_named_simulation(name: str, request: GuiRunRequest) -> NamedResult:
     """Solve one GUI request and package inputs with the result."""
     thermal, orbit, earth_ir, albedo = build_model_inputs(request)
@@ -313,12 +402,12 @@ def run_named_simulation(name: str, request: GuiRunRequest) -> NamedResult:
 
 def run_single_mode(request: GuiRunRequest) -> CompletedGuiStudy:
     """Mode 1: one user simulation."""
-    primary = run_named_simulation("User simulation", request)
+    primary = run_named_simulation(SINGLE_CASE_NAME, request)
     return CompletedGuiStudy(mode="single", primary=primary)
 
 
 def run_baseline_comparison_mode(request: GuiRunRequest) -> CompletedGuiStudy:
-    """Mode 2: Phase 3B baseline vs user-modified case."""
+    """Mode 2: default reference vs user-modified case."""
     baseline_request = default_gui_request()
     # Match orbit count and time step so the comparison is fair by default.
     baseline_request = GuiRunRequest(
@@ -328,8 +417,8 @@ def run_baseline_comparison_mode(request: GuiRunRequest) -> CompletedGuiStudy:
             "time_step_s": request.time_step_s,
         }
     )
-    baseline = run_named_simulation("Default reference case", baseline_request)
-    modified = run_named_simulation("Modified", request)
+    baseline = run_named_simulation(REF_CASE_NAME, baseline_request)
+    modified = run_named_simulation(MOD_CASE_NAME, request)
     return CompletedGuiStudy(
         mode="baseline_compare",
         primary=modified,
@@ -339,7 +428,7 @@ def run_baseline_comparison_mode(request: GuiRunRequest) -> CompletedGuiStudy:
 
 
 def run_environment_comparison_mode(request: GuiRunRequest) -> CompletedGuiStudy:
-    """Mode 3: solar-only, +Earth IR, +Earth IR + albedo."""
+    """Mode 3: No Earth heating → +Earth IR → +Earth IR + albedo."""
     case_a_req = GuiRunRequest(
         **{
             **request.__dict__,
@@ -361,9 +450,9 @@ def run_environment_comparison_mode(request: GuiRunRequest) -> CompletedGuiStudy
             "include_albedo": True,
         }
     )
-    case_a = run_named_simulation("A: solar + internal", case_a_req)
-    case_b = run_named_simulation("B: + Earth IR", case_b_req)
-    case_c = run_named_simulation("C: + Earth IR + albedo", case_c_req)
+    case_a = run_named_simulation(ENV_CASE_A, case_a_req)
+    case_b = run_named_simulation(ENV_CASE_B, case_b_req)
+    case_c = run_named_simulation(ENV_CASE_C, case_c_req)
     return CompletedGuiStudy(
         mode="environment_compare",
         primary=case_c,
@@ -482,6 +571,7 @@ def make_comparison_temperature_figure(
     marker_curve_name: str | None = None,
     title: str = "Temperature comparison",
     shade_from: NamedResult | None = None,
+    emphasize_name: str | None = None,
 ):
     """Plot several histories. Eclipse shading uses shade_from (or first curve)."""
     from matplotlib.patches import Patch
@@ -501,16 +591,19 @@ def make_comparison_temperature_figure(
     _shade_eclipses(axis, shade_source.result, [True])
 
     marker_curve = None
+    emphasized = emphasize_name or marker_curve_name
     for index, curve in enumerate(curves):
         time_min = [second / 60.0 for second in curve.result.time_s]
         temp_c = [kelvin_to_celsius(temp_k) for temp_k in curve.result.temperature_k]
+        is_focus = emphasized is not None and curve.name == emphasized
         axis.plot(
             time_min,
             temp_c,
             color=colors[index % len(colors)],
             linestyle=styles[index % len(styles)],
-            linewidth=2.2,
-            zorder=2 + index,
+            linewidth=3.0 if is_focus else 1.7,
+            alpha=1.0 if is_focus else 0.72,
+            zorder=4 if is_focus else 2 + index,
             label=curve.name,
         )
         if marker_curve_name is not None and curve.name == marker_curve_name:
@@ -543,7 +636,10 @@ def make_comparison_temperature_figure(
     axis.set_title(title, pad=12)
     axis.grid(True, axis="y", zorder=1)
     axis.grid(False, axis="x")
-    note = "Single-node model · shaded bands mark eclipse."
+    note = (
+        "Grey bands = eclipse (Earth blocks direct sunlight). "
+        "Single-node model temperatures."
+    )
     if different_orbits:
         note += (
             f" Eclipse shading follows '{shade_source.name}' only "
@@ -558,7 +654,7 @@ def make_comparison_temperature_figure(
             label=f"Eclipse ({shade_source.name})",
         )
     ]
-    axis.legend(handles=handles, loc="best", fontsize=9)
+    axis.legend(handles=handles, loc="best", fontsize=8, frameon=False)
     figure.tight_layout()
     return figure
 
@@ -568,12 +664,12 @@ def make_heat_flow_bar_figure(snapshot) -> object:
     plt = _pyplot()
     _configure_plot_style(plt)
     labels = [
-        "Solar heating",
-        "Earth IR heating",
-        "Albedo heating",
-        "Internal heat",
-        "Radiative cooling",
-        "Net heat flow",
+        "Direct solar heating (+)",
+        "Earth infrared heating (+)",
+        "Albedo heating (+)",
+        "Internal heating (+)",
+        "Radiative cooling (−)",
+        "Net thermal power",
     ]
     values = [
         snapshot.q_solar_w,

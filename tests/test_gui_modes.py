@@ -5,15 +5,29 @@ from __future__ import annotations
 import unittest
 
 from satellite_thermal.gui_support import (
+    ENV_CASE_A,
+    ENV_CASE_B,
+    ENV_CASE_C,
+    MOD_CASE_NAME,
+    REF_CASE_NAME,
     GuiRunRequest,
     all_curves,
     default_gui_request,
+    default_inspect_curve_name,
+    environment_comparison_interpretation,
+    environment_comparison_summary_rows,
+    resolve_inspect_curve,
     run_baseline_comparison_mode,
     run_environment_comparison_mode,
     run_single_mode,
     temperature_metrics_c,
 )
-from satellite_thermal.orbit import satellite_position_m, orbital_period_s, orbital_radius_m, position_angle_rad
+from satellite_thermal.orbit import (
+    orbital_period_s,
+    orbital_radius_m,
+    position_angle_rad,
+    satellite_position_m,
+)
 from satellite_thermal.orbit_3d import build_orbit_3d_figure
 
 
@@ -39,7 +53,9 @@ class GuiModeTests(unittest.TestCase):
         self.assertEqual(study.mode, "baseline_compare")
         curves = all_curves(study)
         self.assertEqual(len(curves), 2)
-        self.assertIn("mass", study.changed_fields)
+        self.assertEqual(curves[0].name, REF_CASE_NAME)
+        self.assertEqual(curves[1].name, MOD_CASE_NAME)
+        self.assertIn("Mass (kg)", study.changed_fields)
         baseline_final = temperature_metrics_c(curves[0].result)["final_c"]
         modified_final = temperature_metrics_c(curves[1].result)["final_c"]
         # Heavier mass cools more slowly in this transient, so final T is warmer.
@@ -52,9 +68,9 @@ class GuiModeTests(unittest.TestCase):
         study = run_environment_comparison_mode(request)
         curves = all_curves(study)
         self.assertEqual(len(curves), 3)
-        self.assertTrue(curves[0].name.startswith("A:"))
-        self.assertTrue(curves[1].name.startswith("B:"))
-        self.assertTrue(curves[2].name.startswith("C:"))
+        self.assertEqual(curves[0].name, ENV_CASE_A)
+        self.assertEqual(curves[1].name, ENV_CASE_B)
+        self.assertEqual(curves[2].name, ENV_CASE_C)
         finals = [curve.result.temperature_k[-1] for curve in curves]
         self.assertLess(finals[0], finals[1])
         self.assertLess(finals[1], finals[2])
@@ -62,6 +78,43 @@ class GuiModeTests(unittest.TestCase):
         self.assertGreater(curves[1].result.earth_infrared_heat_w, 0.0)
         self.assertFalse(curves[1].result.include_albedo)
         self.assertTrue(curves[2].result.include_albedo)
+
+
+class EnvironmentInspectDefaultsTests(unittest.TestCase):
+    def test_default_inspect_case_is_case_c(self) -> None:
+        request = GuiRunRequest(
+            **{**default_gui_request().__dict__, "orbit_count": 1, "time_step_s": 30.0}
+        )
+        study = run_environment_comparison_mode(request)
+        self.assertEqual(default_inspect_curve_name(study), ENV_CASE_C)
+        self.assertEqual(study.primary.name, ENV_CASE_C)
+
+    def test_switching_inspect_case_does_not_change_histories(self) -> None:
+        request = GuiRunRequest(
+            **{**default_gui_request().__dict__, "orbit_count": 1, "time_step_s": 30.0}
+        )
+        study = run_environment_comparison_mode(request)
+        curves = all_curves(study)
+        finals_before = [curve.result.temperature_k[-1] for curve in curves]
+        for name in (ENV_CASE_A, ENV_CASE_B, ENV_CASE_C):
+            chosen = resolve_inspect_curve(curves, name, ENV_CASE_C)
+            self.assertEqual(chosen.name, name)
+        finals_after = [curve.result.temperature_k[-1] for curve in curves]
+        self.assertEqual(finals_before, finals_after)
+
+    def test_environment_summary_uses_simulation_finals(self) -> None:
+        request = GuiRunRequest(
+            **{**default_gui_request().__dict__, "orbit_count": 1, "time_step_s": 30.0}
+        )
+        curves = all_curves(run_environment_comparison_mode(request))
+        rows = environment_comparison_summary_rows(curves)
+        finals = [temperature_metrics_c(curve.result)["final_c"] for curve in curves]
+        self.assertEqual(rows[0]["Temperature change"], "Reference")
+        self.assertIn(f"{finals[1] - finals[0]:+.2f} K", rows[1]["Temperature change"])
+        self.assertIn(f"{finals[2] - finals[1]:+.2f} K", rows[2]["Temperature change"])
+        text = environment_comparison_interpretation(curves)
+        self.assertIn(f"{finals[1] - finals[0]:+.2f} K", text)
+        self.assertIn(f"{finals[2] - finals[1]:+.2f} K", text)
 
 
 class Orbit3dSyncTests(unittest.TestCase):
