@@ -64,7 +64,10 @@ Q_radiated  = ε · σ · A_radiating · T⁴
 
 Orbit period uses a circular Keplerian formula. Eclipse uses a cylindrical
 Earth-shadow test with selectable orbital beta angle (default β = 0° preserves
-the Version 1.0 reference). Time integration is **explicit Euler**.
+the Version 1.0 reference). An optional **enhanced** thermal mode replaces the
+fixed solar projected area with six bus-face contributions under a prescribed
+attitude; legacy fixed-area mode remains the default. Time integration is
+**explicit Euler**.
 
 Full detail: [`docs/MODEL.md`](docs/MODEL.md).
 
@@ -75,9 +78,12 @@ Full detail: [`docs/MODEL.md`](docs/MODEL.md).
 | Group | Examples |
 | --- | --- |
 | Orbit / numerics | altitude, beta angle, orbit count, time step |
+| Model | legacy fixed areas or enhanced face solar + attitude |
+| Attitude (enhanced) | fixed inertial, nadir-pointing, Sun-pointing |
+| Body (enhanced) | length / width / height |
 | Thermal mass | mass, specific heat, initial temperature |
 | Optics | solar absorptivity α, IR emissivity ε |
-| Areas | projected, radiating, Earth-facing, albedo areas |
+| Areas | projected, radiating, Earth-facing, albedo areas (legacy / planetary) |
 | Environment | solar flux, Earth OLR, Bond albedo, Earth IR / albedo flags |
 | Modes | single run, reference comparison, environmental heating stack |
 
@@ -137,9 +143,10 @@ validation against flight hardware.
 - One isothermal node (no multi-node conduction network)
 - Effective areas are inputs, not CAD geometry
 - Emission is to a 0 K sink; Earth IR / albedo are added as separate loads
-- Cylindrical shadow with variable beta (affects eclipse timing); solar heating
-  still uses a fixed projected area until the planned attitude-dependent upgrade
-- No detailed attitude dynamics
+- Cylindrical shadow with variable beta (affects eclipse timing)
+- Legacy mode: fixed projected area; enhanced mode: face-based solar with
+  prescribed attitudes (not closed-loop ACS)
+- Earth IR / albedo remain effective-area loads; 3D wing panels are visual-only
 - 3D craft is illustrative and enlarged for visibility
 - Not flight software; not endorsed by NASA, ESA, or any manufacturer
 

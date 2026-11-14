@@ -10,14 +10,19 @@ import math
 from dataclasses import asdict, dataclass
 
 from satellite_thermal.albedo import AlbedoParameters
+from satellite_thermal.attitude import AttitudeMode, parse_attitude_mode
 from satellite_thermal.earth_infrared import EarthInfraredParameters
 from satellite_thermal.orbit import CircularOrbit, orbital_period_s
 from satellite_thermal.orbital_simulation import (
+    THERMAL_MODEL_ENHANCED,
+    THERMAL_MODEL_LEGACY,
     OrbitalThermalResult,
     eclipse_intervals_s,
+    parse_thermal_model,
     simulate_orbital_eclipse,
 )
 from satellite_thermal.parameters import Phase1Parameters
+from satellite_thermal.spacecraft_geometry import RectangularBusGeometry
 from satellite_thermal.units import kelvin_to_celsius
 from satellite_thermal.validation import require_positive
 
@@ -49,6 +54,11 @@ class GuiRunRequest:
     time_step_s: float
     include_earth_infrared: bool
     include_albedo: bool
+    thermal_model: str = THERMAL_MODEL_LEGACY
+    attitude_mode: str = AttitudeMode.FIXED_INERTIAL.value
+    body_length_m: float = 0.1
+    body_width_m: float = 0.1
+    body_height_m: float = 0.1
 
 
 def default_gui_request() -> GuiRunRequest:
@@ -73,7 +83,23 @@ def default_gui_request() -> GuiRunRequest:
         time_step_s=5.0,
         include_earth_infrared=True,
         include_albedo=True,
+        thermal_model=THERMAL_MODEL_LEGACY,
+        attitude_mode=AttitudeMode.FIXED_INERTIAL.value,
+        body_length_m=0.1,
+        body_width_m=0.1,
+        body_height_m=0.1,
     )
+
+
+def geometry_from_request(request: GuiRunRequest) -> RectangularBusGeometry:
+    """Build validated bus geometry from GUI dimensions and optics."""
+    return RectangularBusGeometry(
+        length_m=request.body_length_m,
+        width_m=request.body_width_m,
+        height_m=request.body_height_m,
+        absorptivity=request.absorptivity,
+        emissivity=request.emissivity,
+    ).validated()
 
 
 def build_model_inputs(request: GuiRunRequest) -> tuple[
@@ -163,6 +189,11 @@ def validate_gui_request(request: GuiRunRequest) -> GuiRunRequest:
         raise ValueError("altitude_km must be greater than 0.")
     if abs(request.beta_deg) > 90.0:
         raise ValueError("beta_deg must be between -90 and 90 degrees.")
+    parse_thermal_model(request.thermal_model)
+    parse_attitude_mode(request.attitude_mode)
+    for dim_name in ("body_length_m", "body_width_m", "body_height_m"):
+        if getattr(request, dim_name) <= 0.0:
+            raise ValueError(f"{dim_name} must be greater than 0.")
 
     # Estimate sample count using the same orbit helper the solver uses.
     orbit = CircularOrbit(
@@ -186,9 +217,15 @@ def request_fingerprint(mode: str, request: GuiRunRequest) -> tuple:
 
 
 def run_gui_simulation(request: GuiRunRequest) -> OrbitalThermalResult:
-    """Run the existing orbital solver from a GUI request."""
+    """Run the orbital solver from a GUI request (legacy or enhanced)."""
     validate_gui_request(request)
     thermal, orbit, earth_ir, albedo = build_model_inputs(request)
+    model = parse_thermal_model(request.thermal_model)
+    geometry = (
+        geometry_from_request(request)
+        if model == THERMAL_MODEL_ENHANCED
+        else None
+    )
     return simulate_orbital_eclipse(
         orbit_count=request.orbit_count,
         time_step_s=request.time_step_s,
@@ -198,6 +235,9 @@ def run_gui_simulation(request: GuiRunRequest) -> OrbitalThermalResult:
         earth_infrared=earth_ir,
         include_albedo=request.include_albedo,
         albedo=albedo,
+        thermal_model=model,
+        geometry=geometry,
+        attitude_mode=request.attitude_mode,
     )
 
 
@@ -264,6 +304,11 @@ _PARAMETER_LABELS = {
     "time_step_s": "Time step (s)",
     "include_earth_infrared": "Include Earth IR",
     "include_albedo": "Include albedo",
+    "thermal_model": "Thermal model",
+    "attitude_mode": "Attitude mode",
+    "body_length_m": "Body length (m)",
+    "body_width_m": "Body width (m)",
+    "body_height_m": "Body height (m)",
 }
 
 _ENV_HEATING_LABELS = {

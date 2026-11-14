@@ -18,6 +18,7 @@ from satellite_thermal.gui_support import (
     environment_comparison_interpretation,
     environment_comparison_summary_rows,
     figure_to_png_bytes,
+    geometry_from_request,
     make_comparison_temperature_figure,
     make_gui_temperature_figure,
     make_heat_flow_bar_figure,
@@ -240,6 +241,16 @@ TERM_HELP = {
         "(asin(R_E/r) ≈ 68° at 500 km) the orbit stays in continuous sunlight "
         "under the cylindrical-shadow model."
     ),
+    "thermal_model": (
+        "Legacy uses fixed projected and radiating areas (Version 1.0). "
+        "Enhanced uses six bus faces with prescribed attitude for solar "
+        "absorption and face-sum radiation. Earth IR and albedo stay "
+        "effective-area loads in both modes."
+    ),
+    "attitude": (
+        "Prescribed geometric orientation only — not a closed-loop attitude "
+        "control simulation. Fixed inertial, nadir-pointing, or Sun-pointing."
+    ),
 }
 
 MODE_LABELS = {
@@ -312,6 +323,11 @@ def _request_from_state() -> GuiRunRequest:
         time_step_s=float(st.session_state.gui_time_step_s),
         include_earth_infrared=bool(st.session_state.gui_include_earth_infrared),
         include_albedo=bool(st.session_state.gui_include_albedo),
+        thermal_model=str(st.session_state.gui_thermal_model),
+        attitude_mode=str(st.session_state.gui_attitude_mode),
+        body_length_m=float(st.session_state.gui_body_length_m),
+        body_width_m=float(st.session_state.gui_body_width_m),
+        body_height_m=float(st.session_state.gui_body_height_m),
     )
 
 
@@ -413,6 +429,29 @@ with st.sidebar:
         key="gui_beta_deg",
         help=TERM_HELP["beta"],
     )
+    st.selectbox(
+        "Thermal model",
+        options=["legacy", "enhanced"],
+        format_func=lambda value: (
+            "Legacy (fixed areas, V1 reference)"
+            if value == "legacy"
+            else "Enhanced (face solar + attitude)"
+        ),
+        key="gui_thermal_model",
+        help=TERM_HELP["thermal_model"],
+    )
+    st.selectbox(
+        "Attitude mode",
+        options=["fixed_inertial", "nadir_pointing", "sun_pointing"],
+        format_func=lambda value: {
+            "fixed_inertial": "Fixed inertial",
+            "nadir_pointing": "Nadir-pointing",
+            "sun_pointing": "Sun-pointing",
+        }[value],
+        key="gui_attitude_mode",
+        help=TERM_HELP["attitude"],
+        disabled=st.session_state.get("gui_thermal_model", "legacy") == "legacy",
+    )
 
     st.markdown("#### Spacecraft")
     st.number_input(
@@ -474,19 +513,43 @@ with st.sidebar:
             step=50.0,
             key="gui_specific_heat_j_per_kg_k",
         )
+        st.caption(
+            "Enhanced-mode bus dimensions (legacy ignores these for heating)."
+        )
+        st.number_input(
+            "Body length along +X (m)",
+            min_value=1e-3,
+            step=0.01,
+            format="%.3f",
+            key="gui_body_length_m",
+        )
+        st.number_input(
+            "Body width along +Y (m)",
+            min_value=1e-3,
+            step=0.01,
+            format="%.3f",
+            key="gui_body_width_m",
+        )
+        st.number_input(
+            "Body height along +Z (m)",
+            min_value=1e-3,
+            step=0.01,
+            format="%.3f",
+            key="gui_body_height_m",
+        )
         st.number_input(
             "Projected solar area (m²)",
             min_value=1e-4,
             format="%.4f",
             key="gui_projected_area_m2",
-            help=TERM_HELP["areas"],
+            help=TERM_HELP["areas"] + " Used in legacy mode only.",
         )
         st.number_input(
             "Radiating area (m²)",
             min_value=1e-4,
             format="%.4f",
             key="gui_radiating_area_m2",
-            help=TERM_HELP["areas"],
+            help=TERM_HELP["areas"] + " Used in legacy mode only.",
         )
         st.number_input(
             "Earth-facing area (m²)",
@@ -693,6 +756,9 @@ snap = heat_flow_at_index(
     include_albedo=viz_curve.request.include_albedo,
     earth_infrared=viz_curve.earth_infrared,
     albedo=viz_curve.albedo,
+    thermal_model=viz_curve.request.thermal_model,
+    geometry=geometry_from_request(viz_curve.request),
+    attitude_mode=viz_curve.request.attitude_mode,
 )
 viz_period = orbital_period_s(viz_curve.orbit)
 orbit_number = snap.time_s / viz_period + 1.0
@@ -739,10 +805,10 @@ st.pyplot(temp_fig, clear_figure=True, use_container_width=True)
 # --- 3D + thermal state ---
 st.markdown("### Orbit and thermal state")
 st.caption(
-    "The 3D view illustrates the satellite's orbital position and eclipse status. "
-    "Select a simulation case to inspect its calculated temperature and heat flows. "
-    "Craft geometry is illustrative and enlarged; attitude is not simulated. "
-    "Position and eclipse come from the orbit model; temperature is single-node."
+    "The 3D view illustrates orbital position, eclipse status, and the prescribed "
+    "bus orientation used for enhanced solar heating. Craft size is enlarged for "
+    "visibility; wing panels are visual-only and are not thermal surfaces. "
+    "Temperature remains a single-node result."
 )
 if len(curves) > 1:
     st.markdown(f"**Inspecting: {viz_curve.name}**")
@@ -753,6 +819,11 @@ with viz_left:
         orbit=viz_curve.orbit,
         sample_index=viz_index,
         title=viz_curve.name,
+        attitude_mode=viz_curve.request.attitude_mode,
+        body_length_m=viz_curve.request.body_length_m,
+        body_width_m=viz_curve.request.body_width_m,
+        body_height_m=viz_curve.request.body_height_m,
+        thermal_model=viz_curve.request.thermal_model,
     )
     st.plotly_chart(
         fig3d,
@@ -796,10 +867,16 @@ with viz_right:
     )
 
 st.pyplot(make_heat_flow_bar_figure(snap), clear_figure=True, use_container_width=True)
+_model_label = (
+    "enhanced face solar"
+    if viz_curve.request.thermal_model == "enhanced"
+    else "legacy fixed areas"
+)
 st.caption(
     "Positive net power warms the spacecraft; negative net power cools it. "
     "Radiative cooling is shown as a negative bar (heat leaving the spacecraft). "
-    f"Values are for **{viz_curve.name}** at the selected time."
+    f"Values are for **{viz_curve.name}** at the selected time "
+    f"({_model_label}; attitude `{viz_curve.request.attitude_mode}`)."
 )
 
 # --- Details ---
@@ -848,7 +925,8 @@ with detail_tabs[1]:
 - Areas are model inputs, not CAD surfaces.
 - Emission uses `εσAT⁴` to a 0 K sink; Earth IR and albedo are separate loads.
 - {TERM_HELP["eclipse"]} {TERM_HELP["beta"]}
-- 3D craft geometry is illustrative and enlarged; attitude is not simulated.
+- {TERM_HELP["thermal_model"]} {TERM_HELP["attitude"]}
+- 3D craft is enlarged; wing panels are visual-only (not thermal faces).
 - Results are numerical / equation consistency checks — not flight-data validation.
 - Sidebar edits do not erase results; a new solve runs only on **Run Simulation**.
 - See [`docs/MODEL.md`](docs/MODEL.md) for equations and assumptions.

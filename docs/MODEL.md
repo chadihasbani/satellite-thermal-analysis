@@ -598,8 +598,53 @@ See [`REFERENCES.md`](REFERENCES.md) for public sources and claim boundaries.
 ### Remaining limitations
 
 - Single lumped node; no multi-node conduction network.
-- Fixed effective areas; no CAD geometry or attitude control.
-- Local Streamlit app only; not deployed.
+- Legacy mode uses fixed effective areas; enhanced mode adds rectangular-bus
+  face solar absorption and face-sum emission with prescribed attitudes only
+  (not closed-loop ACS).
+- Earth IR and albedo remain Version 1.0 effective-area loads in both modes.
+- 3D wing panels are visual-only and are not thermal surfaces.
 - No experimental / flight validation.
 - 3D scene is illustrative geometry synchronized to the orbit/eclipse
-  state, not a photoreal mission animation.
+  state and prescribed bus orientation, not a photoreal mission animation.
+
+## Version 2.0 — Checkpoint 2: attitude-dependent solar heating
+
+### Model modes
+
+| Mode | Solar absorption | Radiative emission | Earth IR / albedo |
+| --- | --- | --- | --- |
+| **Legacy** (default) | `α A_projected S` when sunlit | `ε σ A_radiating T⁴` | V1 effective areas |
+| **Enhanced** | `Σ α_i S A_i max(0, n_i·s)` | `Σ ε_i σ A_i T⁴` | V1 effective areas (retained) |
+
+Legacy mode with β = 0° preserves the Version 1.0 reference finals. Enhanced
+mode with a 0.1 m cube, fixed-inertial attitude, and β = 0° reproduces the
+same solar and radiation terms because only the +X face is sunlit and
+`A_total = 0.06 m²`.
+
+### Coordinate systems
+
+- **Inertial:** Earth centre; orbit in XY; Sun `s = (cos β, 0, sin β)` toward
+  the Sun (same convention as the cylindrical eclipse test).
+- **Orbital basis:** `r̂`, `θ̂`, `ĥ` with `r̂ × θ̂ = ĥ`.
+- **Body:** right-handed +X, +Y, +Z; length/width/height along those axes.
+
+### Attitude modes (prescribed geometry only)
+
+1. **Fixed inertial** — body axes = inertial XYZ.
+2. **Nadir-pointing** — +Z = nadir (−`r̂`), +X = along-track (`θ̂`), +Y completes RH.
+3. **Sun-pointing** — +X = `s`; +Y from `ĥ × s`, with fallback to `θ̂` (then
+   inertial) when `|s · ĥ|` is too close to 1 (singular roll reference).
+
+### Planetary heating choice (Checkpoint 2)
+
+Attitude-dependent solar heating does **not** automatically make Earth IR or
+albedo attitude-dependent. This checkpoint **retains** the Version 1.0
+effective-area planetary loads and labels that limitation explicitly.
+Implementing face-to-Earth view factors is deferred.
+
+### Sources
+
+Face solar heating `Q = α S A max(0, n·s)` follows the standard projected-area
+/ incidence-angle form used in small-satellite thermal notes (e.g. NASA
+SmallSat Institute materials and Cottingham / TFAWS on-orbit environment
+lectures). See [`SOURCE_TRACEABILITY.md`](SOURCE_TRACEABILITY.md).

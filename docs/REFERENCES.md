@@ -47,7 +47,18 @@ Used for orbital / eclipse thinking relevant to thermal engineers (beta angle,
 sunlight/eclipse, attitude effects). This code uses a simplified circular orbit
 and cylindrical shadow with selectable beta (default 0 for the V1 reference).
 
-### 3b. Rickman — Introduction to On-Orbit Thermal Environments (TFAWS 2023)
+### 3b. Cottingham — Spacecraft Thermal Control lecture (ENAE 691)
+
+- NTRS PDF: https://ntrs.nasa.gov/api/citations/20230001953/downloads/ENAE%20691%20Spring23%20Thermal%20Cottingham.pdf
+- Accessed for Checkpoint 2.
+
+States that environmental heat transfer to a satellite surface depends on
+orientation and optical properties, with projected area `A_p = A cos θ` for
+solar loading. Used as supporting context for the enhanced-mode face relation
+`Q_i = α_i S A_i max(0, n_i · s)`. This project’s implementation and singular
+attitude handling are documented in `docs/MODEL.md`.
+
+### 3c. Rickman — Introduction to On-Orbit Thermal Environments (TFAWS 2023)
 
 - https://tfaws.nasa.gov/wp-content/uploads/16.On-Orbit-Thermal-Environments-TFAWS-2023_SRickman.pdf
 - Accessed for Checkpoint 1 documentation.
