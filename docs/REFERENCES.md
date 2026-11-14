@@ -47,7 +47,56 @@ Used for orbital / eclipse thinking relevant to thermal engineers (beta angle,
 sunlight/eclipse, attitude effects). This code uses a simplified circular orbit
 and cylindrical shadow with selectable beta (default 0 for the V1 reference).
 
-### 3b. Cottingham — Spacecraft Thermal Control lecture (ENAE 691)
+### 3a. NASA Preferred Practice — Earth Orbit Environmental Heating (GD-AP-2301)
+
+- PDF: https://extapps.ksc.nasa.gov/Reliability/Documents/Preferred_Practices/2301.pdf
+
+States nominal solar ≈ 1367.5 W/m² with winter 1422 W/m² and summer 1318 W/m²,
+recommends albedo factors 0.35 / 0.30 / 0.25 for hot / nominal / cold programs,
+and gives the energy-balance relation
+`Earth Emitted Energy = [(1 − Albedo Factor) × Solar Constant] / 4.0`
+for consistent OLR when solar and albedo are varied together (Table 1).
+
+**Relation to this project:** Checkpoint 4 Hot/Cold environmental fluxes follow
+this practice’s winter/summer solar values, hot/cold albedo factors, and
+energy-balance OLR. GD-AP-2301 Table 1 is an **orbit-average** screening
+table; this simulator applies those triples as **constant** environmental
+parameters for every time step. The repository Nominal case keeps V1
+educational `S = 1361`, `a = 0.30`, `E_olr = 240` for baseline continuity.
+
+### 3b. NASA TM / STEM near-Earth thermal environment guidelines (alternative convention)
+
+- NTRS record: https://ntrs.nasa.gov/citations/20020004360
+- STEM user material: https://ntrs.nasa.gov/api/citations/20020001443/downloads/20020001443.pdf
+
+Describes ERBE-based selection of albedo and OLR as a function of averaging
+time and orbit class, and warns that extreme albedo and OLR do not simply
+stack. Orion passive-thermal materials also quote ISS-oriented paired
+examples (e.g. hot ≈ 1414 W/m², a≈0.28, OLR≈258 W/m²).
+
+**Relation to this project:** documented as the main alternative convention;
+**not** used for the educational presets because this model holds a and OLR
+constant over the orbit.
+
+### 3c. ECSS thermal training / handbook context
+
+- ECSS-E-HB-31-03A Thermal analysis handbook:
+  https://ecss.nl/wp-content/uploads/2016/11/ECSS-E-HB-31-03A15November2016.pdf
+- ESA ECSS-E-ST-31 training slides (Rev. 1, 2023):
+  https://ecss.nl/wp-content/uploads/2023/05/ESA_ECSS-E-ST-31_Standardisation_Training_Course_2023_Rev1.pdf
+
+Training materials describe hot/cold case thinking (e.g. higher solar /
+higher dissipation for hot; lower dissipation and long eclipse relevance for
+cold) and quote Earth-orbit solar ranges on the order of 1321–1419 W/m² with
+mean albedo ~0.3 and Earth IR ~240 W/m². They also note EOL optical
+degradation for hot predictions.
+
+**Relation to this project:** supports separating environmental vs operational
+assumptions and using higher/lower illustrative dissipation in Hot/Cold
+presets. EOL coating changes are intentionally **not** applied by the
+presets (geometry/optics remain user-controlled).
+
+### 3d. Cottingham — Spacecraft Thermal Control lecture (ENAE 691)
 
 - NTRS PDF: https://ntrs.nasa.gov/api/citations/20230001953/downloads/ENAE%20691%20Spring23%20Thermal%20Cottingham.pdf
 - Accessed for Checkpoint 2.
@@ -88,16 +137,27 @@ modelling, and numerical energy-balance approaches for small satellites.
 
 | Input | Value | Notes |
 | --- | --- | --- |
-| Solar constant `S` | 1361 W/m² | Common modern solar-irradiance scale |
+| Solar constant `S` | 1361 W/m² | Common modern solar-irradiance scale (repo Nominal / V1) |
 | Earth Bond albedo `a` | 0.30 | Nominal global-mean albedo class value |
-| Earth OLR `E_olr` | 240 W/m² | Illustrative TOA outgoing longwave magnitude |
+| Earth OLR `E_olr` | 240 W/m² | Illustrative TOA outgoing longwave magnitude (repo Nominal / V1) |
 | `alpha`, `epsilon` | 0.60, 0.80 | Assumed coating-like optical properties |
 | Internal power (constant) | 5 W | Version 1.0 educational default |
 | Standby / nominal / high | 1 / 5 / 15 W | Checkpoint 3 illustrative operating levels only |
 
+### Checkpoint 4 screening fluxes (Hot / Cold)
+
+| Input | Hot | Cold | Source class |
+| --- | --- | --- | --- |
+| Solar irradiance | 1422 W/m² | 1318 W/m² | Externally sourced (NASA GD-AP-2301 winter/summer) |
+| Bond albedo | 0.35 | 0.25 | Externally sourced (NASA GD-AP-2301 hot/cold factors) |
+| Earth OLR | ≈ 231.075 W/m² | ≈ 247.125 W/m² | Derived via GD-AP-2301 `E=(1−a)S/4` |
+| Beta / internal power | see `docs/MODEL.md` | see `docs/MODEL.md` | Illustrative screening assumptions |
+
 These defaults are documented modelling choices for this repository. They are
 **not** “official NASA design inputs” for a specific spacecraft. Scheduled
 internal-power profiles do **not** represent a real electrical power subsystem.
+Hot/Cold presets are educational screening cases, not mission-qualified
+worst-case designs.
 
 ## Unavailable / unused
 

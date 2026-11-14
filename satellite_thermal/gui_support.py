@@ -33,6 +33,15 @@ from satellite_thermal.orbital_simulation import (
 )
 from satellite_thermal.parameters import Phase1Parameters
 from satellite_thermal.spacecraft_geometry import RectangularBusGeometry
+from satellite_thermal.thermal_scenarios import (
+    SCENARIO_CASE_COLD,
+    SCENARIO_CASE_HOT,
+    SCENARIO_CASE_NOMINAL,
+    ThermalScenarioId,
+    build_scenario_definition,
+    parse_thermal_scenario_id,
+    scenario_overlay_fields,
+)
 from satellite_thermal.units import kelvin_to_celsius
 from satellite_thermal.validation import require_positive
 
@@ -360,9 +369,34 @@ def clamp_sample_index(n_samples: int, index: int) -> int:
     return max(0, min(index, n_samples - 1))
 
 
-def request_fingerprint(mode: str, request: GuiRunRequest) -> tuple:
+def request_fingerprint(
+    mode: str,
+    request: GuiRunRequest,
+    scenario_id: str = ThermalScenarioId.CUSTOM.value,
+) -> tuple:
     """Hashable snapshot of the inputs that produced a displayed study."""
-    return (mode, tuple(sorted(asdict(request).items())))
+    return (
+        mode,
+        parse_thermal_scenario_id(scenario_id).value,
+        tuple(sorted(asdict(request).items())),
+    )
+
+
+def apply_thermal_scenario(
+    request: GuiRunRequest,
+    scenario_id: str | ThermalScenarioId,
+) -> GuiRunRequest:
+    """Apply Nominal/Hot/Cold overlays; ``custom`` leaves the request unchanged.
+
+    Overrides only environmental fluxes, beta, planetary-load flags, and the
+    constant internal-power fields owned by the preset. Geometry, coatings,
+    altitude, step size, thermal model, and attitude are preserved.
+    """
+    kind = parse_thermal_scenario_id(scenario_id)
+    if kind is ThermalScenarioId.CUSTOM:
+        return request
+    definition = build_scenario_definition(kind, altitude_km=request.altitude_km)
+    return GuiRunRequest(**{**request.__dict__, **scenario_overlay_fields(definition)})
 
 
 def run_gui_simulation(request: GuiRunRequest) -> OrbitalThermalResult:
@@ -434,6 +468,7 @@ ENV_CASE_NAMES = (ENV_CASE_A, ENV_CASE_B, ENV_CASE_C)
 REF_CASE_NAME = "Reference"
 MOD_CASE_NAME = "Modified"
 SINGLE_CASE_NAME = "Single simulation"
+SCENARIO_COMPARE_MODE = "scenario_compare"
 
 _PARAMETER_LABELS = {
     "mass_kg": "Mass (kg)",
@@ -582,6 +617,8 @@ def default_inspect_curve_name(study: CompletedGuiStudy) -> str:
     """Default case used for 3D / heat-flow inspection after a solve."""
     if study.mode == "environment_compare":
         return study.primary.name  # Case C
+    if study.mode == SCENARIO_COMPARE_MODE:
+        return SCENARIO_CASE_NOMINAL
     return study.primary.name
 
 
@@ -671,6 +708,76 @@ def run_environment_comparison_mode(request: GuiRunRequest) -> CompletedGuiStudy
         mode="environment_compare",
         primary=case_c,
         companions=(case_a, case_b),
+    )
+
+
+def run_scenario_comparison_mode(request: GuiRunRequest) -> CompletedGuiStudy:
+    """Mode 4: Cold / Nominal / Hot screening with shared spacecraft settings."""
+    cold_req = apply_thermal_scenario(request, ThermalScenarioId.COLD)
+    nominal_req = apply_thermal_scenario(request, ThermalScenarioId.NOMINAL)
+    hot_req = apply_thermal_scenario(request, ThermalScenarioId.HOT)
+    cold = run_named_simulation(SCENARIO_CASE_COLD, cold_req)
+    nominal = run_named_simulation(SCENARIO_CASE_NOMINAL, nominal_req)
+    hot = run_named_simulation(SCENARIO_CASE_HOT, hot_req)
+    return CompletedGuiStudy(
+        mode=SCENARIO_COMPARE_MODE,
+        primary=nominal,
+        companions=(cold, hot),
+        changed_fields=(
+            "Thermal screening scenario (Cold / Nominal / Hot overlays)",
+        ),
+    )
+
+
+def scenario_comparison_summary_rows(
+    curves: tuple[NamedResult, ...],
+) -> list[dict[str, object]]:
+    """Final-temperature summary for Cold / Nominal / Hot curves."""
+    if len(curves) != 3:
+        raise ValueError("Scenario summary requires exactly three curves.")
+    by_name = {curve.name: curve for curve in curves}
+    ordered = (
+        by_name[SCENARIO_CASE_COLD],
+        by_name[SCENARIO_CASE_NOMINAL],
+        by_name[SCENARIO_CASE_HOT],
+    )
+    rows: list[dict[str, object]] = []
+    nominal_final = temperature_metrics_c(ordered[1].result)["final_c"]
+    for curve in ordered:
+        metrics = temperature_metrics_c(curve.result)
+        delta = metrics["final_c"] - nominal_final
+        rows.append(
+            {
+                "Scenario": curve.name,
+                "β (°)": round(curve.request.beta_deg, 2),
+                "S (W/m²)": round(curve.request.solar_flux_w_per_m2, 1),
+                "Albedo": round(curve.request.earth_bond_albedo, 3),
+                "OLR (W/m²)": round(curve.request.earth_olr_w_per_m2, 2),
+                "Q_internal (W)": round(curve.request.internal_heat_w, 2),
+                "Final (°C)": round(metrics["final_c"], 2),
+                "vs Nominal (K)": (
+                    "Reference" if curve.name == SCENARIO_CASE_NOMINAL else f"{delta:+.2f}"
+                ),
+            }
+        )
+    return rows
+
+
+def scenario_comparison_interpretation(curves: tuple[NamedResult, ...]) -> str:
+    """Short interpretation of Cold/Nominal/Hot final temperatures."""
+    if len(curves) != 3:
+        raise ValueError("Scenario interpretation requires exactly three curves.")
+    by_name = {curve.name: curve for curve in curves}
+    cold = temperature_metrics_c(by_name[SCENARIO_CASE_COLD].result)["final_c"]
+    nominal = temperature_metrics_c(by_name[SCENARIO_CASE_NOMINAL].result)["final_c"]
+    hot = temperature_metrics_c(by_name[SCENARIO_CASE_HOT].result)["final_c"]
+    return (
+        "Under the selected spacecraft settings, the Cold screening final "
+        f"temperature is {cold - nominal:+.2f} K relative to Nominal, and the "
+        f"Hot screening final temperature is {hot - nominal:+.2f} K relative to "
+        "Nominal. Differences combine environmental fluxes, eclipse exposure "
+        "(beta), and illustrative internal power — not a universal worst case. "
+        "These are model results, not measured satellite temperatures."
     )
 
 
@@ -909,6 +1016,14 @@ def all_curves(study: CompletedGuiStudy) -> tuple[NamedResult, ...]:
     if study.mode == "environment_compare":
         # companions are A, B; primary is C
         return (*study.companions, study.primary)
+    if study.mode == SCENARIO_COMPARE_MODE:
+        # companions are Cold, Hot; primary is Nominal — reorder Cold, Nominal, Hot.
+        by_name = {curve.name: curve for curve in (study.primary, *study.companions)}
+        return (
+            by_name[SCENARIO_CASE_COLD],
+            by_name[SCENARIO_CASE_NOMINAL],
+            by_name[SCENARIO_CASE_HOT],
+        )
     if study.mode == "baseline_compare":
         return (*study.companions, study.primary)
     return (study.primary,)

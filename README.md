@@ -68,7 +68,10 @@ the Version 1.0 reference). An optional **enhanced** thermal mode replaces the
 fixed solar projected area with six bus-face contributions under a prescribed
 attitude; legacy fixed-area mode remains the default. Internal heat may be
 constant (Version 1.0 default) or follow illustrative time-dependent schedules
-(eclipse-reduced, periodic high-power, or custom intervals). Time integration is
+(eclipse-reduced, periodic high-power, or custom intervals). Optional
+**Nominal / Hot / Cold** screening presets adjust environmental fluxes, beta,
+and constant internal power using a documented NASA GD-AP-2301 pairing for
+Hot/Cold (Nominal keeps Version 1.0 educational defaults). Time integration is
 **explicit Euler**.
 
 Full detail: [`docs/MODEL.md`](docs/MODEL.md).
@@ -80,6 +83,7 @@ Full detail: [`docs/MODEL.md`](docs/MODEL.md).
 | Group | Examples |
 | --- | --- |
 | Orbit / numerics | altitude, beta angle, orbit count, time step |
+| Thermal scenario | Nominal, Hot screening, Cold screening, or Custom |
 | Model | legacy fixed areas or enhanced face solar + attitude |
 | Attitude (enhanced) | fixed inertial, nadir-pointing, Sun-pointing |
 | Body (enhanced) | length / width / height |
@@ -88,7 +92,7 @@ Full detail: [`docs/MODEL.md`](docs/MODEL.md).
 | Optics | solar absorptivity α, IR emissivity ε |
 | Areas | projected, radiating, Earth-facing, albedo areas (legacy / planetary) |
 | Environment | solar flux, Earth OLR, Bond albedo, Earth IR / albedo flags |
-| Modes | single run, reference comparison, environmental heating stack |
+| Modes | single run, reference comparison, environmental heating stack, Hot/Nominal/Cold compare |
 
 ---
 

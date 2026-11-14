@@ -715,3 +715,60 @@ truncated history that could be mistaken for a complete orbit set.
 Default standby / nominal / high-power values (1 / 5 / 15 W) are **illustrative
 assumptions (C)**, not a published spacecraft power budget. No battery or EPS
 model is included.
+
+## Version 2.0 — Checkpoint 4: hot / nominal / cold screening scenarios
+
+### Modelling convention choice
+
+Two common LEO environmental screening conventions were considered:
+
+| Convention | Idea | Used here? |
+| --- | --- | --- |
+| NASA Preferred Practice GD-AP-2301 energy-balance triples | Seasonal solar + paired albedo; `E_olr = (1−a)S/4` | **Yes** for Hot/Cold fluxes |
+| ERBE / STEM / mission NEDD statistical albedo–OLR pairs | Inclination- and time-constant-dependent extremes where max albedo and max OLR are not stacked independently | Documented alternative only |
+
+Because this simulator holds planetary albedo and OLR **constant** over an orbit
+(Version 1.0 effective-area Earth loads), energy-balance triples are the
+physically consistent match. Statistical ERBE pairs remain valuable for
+mission design with short thermal time constants but are **not** the preset
+basis here.
+
+GD-AP-2301 Table 1 combinations are intended for **orbit-average** screening
+analyses. In this GUI they are applied as **simplified constant** environmental
+parameters (fixed S, a, and E_olr for every time step), matching the repository’s
+constant-load Earth IR / albedo model rather than computing orbit-averaged
+incident heat rates on oriented surfaces.
+
+Independently stacking every maximum (or every minimum) environmental and
+operational input was rejected as non-defensible for screening.
+
+### Preset table (500 km educational spacecraft)
+
+| Parameter | Nominal | Hot screening | Cold screening | Classification |
+| --- | --- | --- | --- | --- |
+| Solar irradiance `S` | 1361 W/m² | 1422 W/m² | 1318 W/m² | Nominal: repo V1 (C); Hot/Cold: NASA GD-AP-2301 winter/summer (B) |
+| Earth Bond albedo `a` | 0.30 | 0.35 | 0.25 | Nominal: repo/GD-AP-2301 nominal (B/C); Hot/Cold: GD-AP-2301 (B) |
+| Earth OLR `E_olr` | 240 W/m² | `(1−0.35)×1422/4 ≈ 231.075` W/m² | `(1−0.25)×1318/4 ≈ 247.125` W/m² | Nominal: repo V1 (C); Hot/Cold: derived from GD-AP-2301 formula (D from B) |
+| Orbital beta `β` | 0° | just above `β_c(h)` (≈ 70° at 500 km) | 0° | Nominal: V1 reference (C); Hot/Cold beta choice: illustrative screening (C) |
+| Earth IR + albedo flags | both on | both on | both on | Modelling assumption (C) |
+| Internal power | constant 5 W | constant 15 W | constant 1 W | Illustrative operating levels (C); ECSS training notes high/low dissipation for hot/cold cases as a practice, not a wattage mandate |
+| Geometry / α / ε | unchanged | unchanged | unchanged | User-controlled; EOL coating degradation is **not** applied |
+
+**Important:** Hot OLR is *lower* than Cold OLR under energy balance. The Cold
+case is still colder because of lower solar, lower albedo, maximum eclipse
+(`β = 0°`), and lower internal power.
+
+Presets are **screening scenarios**, not universal worst-case spacecraft
+conditions. Custom mode leaves sidebar values unchanged.
+
+### GUI behaviour
+
+- Scenario selector: Nominal / Hot / Cold / Custom.
+- While Nominal / Hot / Cold is selected, preset-owned inputs (S, a, E_olr, β,
+  constant internal power, power-schedule kind, and planetary-load flags) are
+  **locked** and re-synchronized from the preset definition (Hot β updates when
+  altitude changes). Custom re-enables editing with no hidden overrides.
+- Compare Hot/Nominal/Cold mode solves all three overlays on shared spacecraft
+  settings (mass, coatings, areas, altitude, step, thermal model, attitude).
+- Existing single, reference-compare, and A/B/C environment modes remain and
+  may optionally apply one preset overlay before solving.

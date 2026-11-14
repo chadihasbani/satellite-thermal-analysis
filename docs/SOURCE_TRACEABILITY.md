@@ -82,6 +82,16 @@ NASA/ESA endorsement or experimental validation of the software.
 - Heat-flow panel and CSV `q_internal_w` match the schedule used by the integrator.
 - GUI time control uses sample-index selection over irregular stored times; validation counts power-event splits against `MAX_GUI_SAMPLES` and refuses truncated runs.
 
+### Checkpoint 4
+
+- Hot/Cold environmental fluxes follow NASA Preferred Practice GD-AP-2301 seasonal solar and hot/cold albedo with energy-balance OLR; Nominal keeps repo V1 educational S/a/OLR (`tests/test_thermal_scenarios.py`).
+- GD-AP-2301 combinations are orbit-average screening values applied here as simplified constant loads.
+- Alternative ERBE/STEM statistical albedo–OLR pairing is documented and not used (constant planetary loads in this model).
+- Beta remains coupled to cylindrical eclipse geometry; Hot uses β > β_c (illustrative continuous-sunlight screening).
+- Scenario overlays do not change geometry or coatings; Custom is identity; preset-owned GUI fields are locked/synced so session state cannot contradict the solver.
+- Scenario-compare and other GUI modes covered by tests.
+- Legacy A/B/C finals under Nominal remain −12.5661 / −6.8313 / −4.5386 °C.
+
 ## Known limitations
 
 - Using a published beta/eclipse or solar-heating discussion does not validate this code as flight software.
@@ -90,3 +100,4 @@ NASA/ESA endorsement or experimental validation of the software.
 - Prescribed attitudes are not ACS dynamics; solar panels in the 3D view are not thermal faces.
 - Eclipse entry/exit for `eclipse_reduced` remain step-sampled (not power-event splits).
 - Interactive GUI runs refuse estimates above `MAX_GUI_SAMPLES`; scripts may pass a higher `max_samples` or omit it.
+- Hot/Cold presets are educational screening cases, not mission-qualified worst cases; they omit EOL optical degradation and ERBE time-constant pairing.

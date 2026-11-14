@@ -10,7 +10,9 @@ import streamlit as st
 
 from satellite_thermal.gui_support import (
     GuiRunRequest,
+    SCENARIO_COMPARE_MODE,
     all_curves,
+    apply_thermal_scenario,
     changed_parameter_rows,
     clamp_sample_index,
     comparison_metrics_rows,
@@ -28,10 +30,21 @@ from satellite_thermal.gui_support import (
     resolve_inspect_curve,
     run_baseline_comparison_mode,
     run_environment_comparison_mode,
+    run_scenario_comparison_mode,
     run_single_mode,
+    scenario_comparison_interpretation,
+    scenario_comparison_summary_rows,
     temperature_history_csv,
     temperature_metrics_c,
     validate_gui_request,
+)
+from satellite_thermal.thermal_scenarios import (
+    ThermalScenarioId,
+    build_scenario_definition,
+    preset_controls_locked,
+    scenario_controlled_field_names,
+    scenario_select_options,
+    sync_session_values_from_scenario,
 )
 from satellite_thermal.heat_flows import heat_flow_at_index
 from satellite_thermal.orbit import orbital_period_s
@@ -258,12 +271,23 @@ TERM_HELP = {
         "(Version 1.0 default). Other schedules use illustrative standby / "
         "nominal / high-power levels — not a real spacecraft power budget."
     ),
+    "thermal_scenario": (
+        "Screening presets set solar irradiance, Earth albedo, Earth OLR, "
+        "orbital beta, planetary-load flags, and constant internal power. "
+        "Those controls are locked while a preset is active so the display "
+        "cannot disagree with the solver. They do not change mass, coatings, "
+        "areas, attitude, altitude, or geometry. Hot/Cold are educational "
+        "screening cases (NASA GD-AP-2301 orbit-average flux pairing applied "
+        "as constant loads), not universal spacecraft worst cases. Custom "
+        "re-enables full editing with no hidden overrides."
+    ),
 }
 
 MODE_LABELS = {
     "single": "Single Simulation",
     "baseline_compare": "Compare Spacecraft Settings",
     "environment_compare": "Compare Environmental Heating",
+    "scenario_compare": "Compare Hot / Nominal / Cold",
 }
 
 
@@ -278,6 +302,10 @@ def _init_state() -> None:
         st.session_state.gui_mode = "single"
     if "inspect_case_name" not in st.session_state:
         st.session_state.inspect_case_name = None
+    if "gui_thermal_scenario" not in st.session_state:
+        st.session_state.gui_thermal_scenario = ThermalScenarioId.CUSTOM.value
+    if "_scenario_sync_id" not in st.session_state:
+        st.session_state._scenario_sync_id = st.session_state.gui_thermal_scenario
     defaults = default_gui_request()
     for field, value in defaults.__dict__.items():
         key = f"gui_{field}"
@@ -289,6 +317,8 @@ def _apply_defaults() -> None:
     defaults = default_gui_request()
     for field, value in defaults.__dict__.items():
         st.session_state[f"gui_{field}"] = value
+    st.session_state.gui_thermal_scenario = ThermalScenarioId.CUSTOM.value
+    st.session_state._scenario_sync_id = ThermalScenarioId.CUSTOM.value
 
 
 def _mode_blurb(mode: str) -> str:
@@ -305,6 +335,11 @@ def _mode_blurb(mode: str) -> str:
             "Compare the same spacecraft with progressively more environmental "
             "heating effects: direct sunlight and internal power, Earth infrared "
             "radiation, and reflected sunlight."
+        ),
+        "scenario_compare": (
+            "Compare Cold, Nominal, and Hot screening overlays on the same "
+            "spacecraft settings. Presets change environment and constant "
+            "internal power only — not coatings or geometry."
         ),
     }[mode]
 
@@ -345,7 +380,14 @@ def _request_from_state() -> GuiRunRequest:
     )
 
 
-def _run_study(mode: str, request: GuiRunRequest):
+def _run_study(mode: str, request: GuiRunRequest, scenario_id: str):
+    # For single / baseline / environment modes, `request` is already
+    # scenario-applied by the caller. Scenario-compare applies Cold/Nominal/Hot
+    # internally from the shared spacecraft settings.
+    del scenario_id  # retained for call-site clarity / future use
+    if mode == SCENARIO_COMPARE_MODE:
+        validate_gui_request(apply_thermal_scenario(request, ThermalScenarioId.NOMINAL))
+        return run_scenario_comparison_mode(request)
     validate_gui_request(request)
     if mode == "single":
         return run_single_mode(request)
@@ -401,7 +443,12 @@ with st.sidebar:
 
     mode = st.radio(
         "Simulation mode",
-        options=["single", "baseline_compare", "environment_compare"],
+        options=[
+            "single",
+            "baseline_compare",
+            "environment_compare",
+            "scenario_compare",
+        ],
         format_func=lambda value: MODE_LABELS[value],
         key="gui_mode",
     )
@@ -409,7 +456,8 @@ with st.sidebar:
     if mode == "baseline_compare":
         st.caption(
             "Reference = established defaults (same orbits and time step). "
-            "Modified = your settings. Identical settings produce overlapping curves."
+            "Modified = your settings (with any selected scenario overlay). "
+            "Identical settings produce overlapping curves."
         )
     elif mode == "environment_compare":
         st.caption(
@@ -417,6 +465,35 @@ with st.sidebar:
             "A: no Earth heating · B: +Earth IR · C: +Earth IR + albedo. "
             "All cases still include radiative cooling to space."
         )
+    elif mode == "scenario_compare":
+        st.caption(
+            "Runs Cold, Nominal, and Hot screening overlays together. "
+            "Spacecraft geometry and coatings come from the sidebar; "
+            "each curve applies its own environment and constant internal power."
+        )
+
+    st.markdown("#### Thermal scenario")
+    scenario_options = scenario_select_options()
+    scenario_ids = [item[0] for item in scenario_options]
+    scenario_labels = {item[0]: item[1] for item in scenario_options}
+    scenario_selector_disabled = mode == "scenario_compare"
+    scenario_id = st.selectbox(
+        "Screening preset",
+        options=scenario_ids,
+        format_func=lambda value: scenario_labels[value],
+        key="gui_thermal_scenario",
+        help=TERM_HELP["thermal_scenario"],
+        disabled=scenario_selector_disabled,
+    )
+    if scenario_selector_disabled:
+        st.caption(
+            "This mode always solves Cold, Nominal, and Hot from the same "
+            "spacecraft geometry and coatings. Environment and constant "
+            "internal-power controls below are locked because each curve "
+            "applies its own screening overlay."
+        )
+
+    preset_locked = preset_controls_locked(scenario_id, mode=mode)
 
     st.markdown("#### Orbit")
     st.number_input("Number of orbits", 1, 20, step=1, key="gui_orbit_count")
@@ -434,7 +511,50 @@ with st.sidebar:
         max_value=2000.0,
         step=50.0,
         key="gui_altitude_km",
+        help=(
+            "Altitude stays editable under presets. Hot screening β is "
+            "recomputed from critical beta at this altitude."
+        ),
     )
+
+    # Sync locked preset fields after altitude so Hot β tracks the current orbit.
+    if mode != "scenario_compare" and scenario_id != ThermalScenarioId.CUSTOM.value:
+        altitude_now = float(st.session_state.gui_altitude_km)
+        needs_sync = (
+            scenario_id != st.session_state.get("_scenario_sync_id")
+            or altitude_now != float(st.session_state.get("_scenario_sync_altitude_km", -1.0))
+        )
+        if needs_sync:
+            updates = sync_session_values_from_scenario(scenario_id, altitude_now)
+            for key, value in updates.items():
+                st.session_state[key] = value
+            st.session_state._scenario_sync_id = scenario_id
+            st.session_state._scenario_sync_altitude_km = altitude_now
+    elif mode != "scenario_compare" and scenario_id == ThermalScenarioId.CUSTOM.value:
+        st.session_state._scenario_sync_id = ThermalScenarioId.CUSTOM.value
+
+    if mode != "scenario_compare" and scenario_id != ThermalScenarioId.CUSTOM.value:
+        definition = build_scenario_definition(
+            scenario_id,
+            altitude_km=float(st.session_state.gui_altitude_km),
+        )
+        st.caption(definition.summary)
+        st.dataframe(
+            definition.parameter_rows(),
+            hide_index=True,
+            use_container_width=True,
+        )
+        st.caption(
+            "Locked preset fields: "
+            + ", ".join(scenario_controlled_field_names())
+            + ". Geometry, mass, coatings, altitude, attitude, and numerics stay editable."
+        )
+    elif preset_locked:
+        st.caption(
+            "Environment, beta, and constant internal-power inputs are locked "
+            "in this mode."
+        )
+
     st.slider(
         "Orbital beta angle β (°)",
         min_value=-90.0,
@@ -442,6 +562,7 @@ with st.sidebar:
         step=1.0,
         key="gui_beta_deg",
         help=TERM_HELP["beta"],
+        disabled=preset_locked,
     )
     st.selectbox(
         "Thermal model",
@@ -485,6 +606,7 @@ with st.sidebar:
             + " Used directly for constant schedules; also the baseline "
             "outside custom intervals."
         ),
+        disabled=preset_locked,
     )
     st.selectbox(
         "Internal power schedule",
@@ -502,6 +624,7 @@ with st.sidebar:
         }[value],
         key="gui_power_schedule_kind",
         help=TERM_HELP["power_schedule"],
+        disabled=preset_locked,
     )
     st.slider(
         "Solar absorptivity α",
@@ -521,23 +644,28 @@ with st.sidebar:
     )
 
     st.markdown("#### Environment")
-    env_disabled = mode == "environment_compare"
+    env_flag_locked = preset_locked or mode == "environment_compare"
     st.checkbox(
         "Include Earth IR",
         key="gui_include_earth_infrared",
         help=TERM_HELP["earth_ir"],
-        disabled=env_disabled,
+        disabled=env_flag_locked,
     )
     st.checkbox(
         "Include albedo",
         key="gui_include_albedo",
         help=TERM_HELP["albedo"],
-        disabled=env_disabled,
+        disabled=env_flag_locked,
     )
-    if env_disabled:
+    if mode == "environment_compare":
         st.caption(
             "In this mode, Earth IR and albedo flags are set by cases A / B / C "
             "(not by these checkboxes)."
+        )
+    elif preset_locked:
+        st.caption(
+            "Earth IR and albedo inclusion flags are locked by the active "
+            "screening preset (both on)."
         )
 
     with st.expander("Advanced parameters"):
@@ -605,6 +733,7 @@ with st.sidebar:
             min_value=0.0,
             step=1.0,
             key="gui_solar_flux_w_per_m2",
+            disabled=preset_locked,
         )
         st.number_input(
             "Earth OLR E_olr (W/m²)",
@@ -612,6 +741,7 @@ with st.sidebar:
             step=1.0,
             key="gui_earth_olr_w_per_m2",
             help=TERM_HELP["olr"],
+            disabled=preset_locked,
         )
         st.slider(
             "Earth Bond albedo a",
@@ -619,7 +749,13 @@ with st.sidebar:
             max_value=1.0,
             step=0.01,
             key="gui_earth_bond_albedo",
+            disabled=preset_locked,
         )
+        if preset_locked:
+            st.caption(
+                "Solar irradiance, Earth OLR, and Bond albedo are locked to the "
+                "active screening preset."
+            )
 
     with st.expander("Internal power schedule (advanced)", expanded=False):
         st.caption(
@@ -679,6 +815,13 @@ with st.sidebar:
         st.caption("Displayed results update only after a successful run.")
 
 request = _request_from_state()
+active_scenario_id = (
+    ThermalScenarioId.CUSTOM.value
+    if mode == "scenario_compare"
+    else str(st.session_state.get("gui_thermal_scenario", ThermalScenarioId.CUSTOM.value))
+)
+if mode != "scenario_compare":
+    request = apply_thermal_scenario(request, active_scenario_id)
 if mode == "environment_compare":
     request = GuiRunRequest(
         **{
@@ -691,9 +834,11 @@ if mode == "environment_compare":
 if run_clicked:
     try:
         with st.spinner("Running simulation…"):
-            study = _run_study(mode, request)
+            study = _run_study(mode, request, active_scenario_id)
         st.session_state.study = study
-        st.session_state.study_fingerprint = request_fingerprint(mode, request)
+        st.session_state.study_fingerprint = request_fingerprint(
+            mode, request, active_scenario_id
+        )
         st.session_state.sample_index = 0
         # Default inspection case after each successful solve (Case C in Mode 3).
         st.session_state.inspect_case_name = default_inspect_curve_name(study)
@@ -724,7 +869,8 @@ if study is None:
 
 inputs_changed = (
     st.session_state.study_fingerprint is not None
-    and st.session_state.study_fingerprint != request_fingerprint(mode, request)
+    and st.session_state.study_fingerprint
+    != request_fingerprint(mode, request, active_scenario_id)
 )
 if inputs_changed:
     st.warning(
@@ -762,6 +908,19 @@ elif study.mode == "environment_compare" and len(curves) == 3:
         use_container_width=True,
     )
     st.caption(environment_comparison_interpretation(curves))
+elif study.mode == SCENARIO_COMPARE_MODE and len(curves) == 3:
+    st.markdown("##### Hot / Nominal / Cold screening comparison")
+    st.dataframe(
+        scenario_comparison_summary_rows(curves),
+        hide_index=True,
+        use_container_width=True,
+    )
+    st.caption(scenario_comparison_interpretation(curves))
+    st.caption(
+        "Cold OLR can exceed Hot OLR under the GD-AP-2301 energy-balance pairing; "
+        "lower solar, lower albedo, longer eclipse, and lower internal power still "
+        "make the Cold case cooler overall."
+    )
 
 # Resolve the inspected curve before the sample slider so unequal sample
 # counts (event-aware power schedules) map 1:1 onto stored times.
@@ -867,6 +1026,19 @@ elif study.mode == "baseline_compare":
             f"Eclipse shading follows **{curves[0].name}** only because "
             "the compared cases use different altitudes / orbital geometry."
         )
+elif study.mode == SCENARIO_COMPARE_MODE:
+    temp_fig = make_comparison_temperature_figure(
+        curves,
+        marker_index=viz_index,
+        marker_curve_name=viz_curve.name,
+        emphasize_name=viz_curve.name,
+        title="Cold / Nominal / Hot screening",
+        shade_from=curves[0],
+    )
+    st.caption(
+        "Eclipse shading follows the Cold curve (β = 0°). Hot screening uses "
+        "continuous sunlight, so it has no eclipse bands."
+    )
 else:
     temp_fig = make_comparison_temperature_figure(
         curves,
@@ -996,6 +1168,21 @@ These are three heating configurations of the **same** simplified spacecraft
             """
         )
         st.caption(f"Currently inspecting **{viz_curve.name}**.")
+    elif study.mode == SCENARIO_COMPARE_MODE and len(curves) == 3:
+        st.markdown("##### Screening scenarios")
+        st.markdown(
+            """
+| Scenario | Environmental idea | Operational idea |
+| --- | --- | --- |
+| **Cold screening** | Summer solar, cold albedo, energy-balance OLR, β = 0° | Illustrative standby power |
+| **Nominal** | Version 1.0 educational S / a / OLR, β = 0° | Illustrative nominal power |
+| **Hot screening** | Winter solar, hot albedo, energy-balance OLR, no eclipse | Illustrative high power |
+            """
+        )
+        st.caption(
+            f"Currently inspecting **{viz_curve.name}**. "
+            "Presets are screening cases, not universal worst-case spacecraft designs."
+        )
 
 with detail_tabs[1]:
     st.markdown(
@@ -1006,6 +1193,7 @@ with detail_tabs[1]:
 - {TERM_HELP["eclipse"]} {TERM_HELP["beta"]}
 - {TERM_HELP["thermal_model"]} {TERM_HELP["attitude"]}
 - {TERM_HELP["power_schedule"]} Explicit Euler holds Q_internal constant over each step.
+- {TERM_HELP["thermal_scenario"]}
 - 3D craft is enlarged; wing panels are visual-only (not thermal faces).
 - Results are numerical / equation consistency checks — not flight-data validation.
 - Sidebar edits do not erase results; a new solve runs only on **Run Simulation**.
@@ -1028,6 +1216,15 @@ with detail_tabs[2]:
             marker_curve_name=viz_curve.name,
             emphasize_name=viz_curve.name,
             title="Reference vs Modified",
+            shade_from=curves[0],
+        )
+    elif study.mode == SCENARIO_COMPARE_MODE:
+        export_temp = make_comparison_temperature_figure(
+            curves,
+            marker_index=viz_index,
+            marker_curve_name=viz_curve.name,
+            emphasize_name=viz_curve.name,
+            title="Cold / Nominal / Hot screening",
             shade_from=curves[0],
         )
     else:
