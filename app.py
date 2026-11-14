@@ -621,8 +621,8 @@ st.pyplot(temp_fig, clear_figure=True, use_container_width=True)
 # --- 3D + thermal state ---
 st.markdown("### Orbit and thermal state")
 st.caption(
-    "Heat flows: positive values heat the spacecraft; radiated power cools it. "
-    "Net = all heat inputs − radiated."
+    "3D view is illustrative — craft enlarged, not to scale. "
+    "Position and eclipse come from the orbit model; attitude is not simulated."
 )
 viz_left, viz_right = st.columns([1.3, 0.9], gap="medium")
 with viz_left:
@@ -674,8 +674,8 @@ with viz_right:
 
 st.pyplot(make_heat_flow_bar_figure(snap), clear_figure=True, use_container_width=True)
 st.caption(
-    "3D view is illustrative — craft enlarged, not to scale. "
-    "Position and eclipse come from the orbit model; attitude is not simulated."
+    "Heat flows: positive values heat the spacecraft; radiated power cools it. "
+    "Net = all heat inputs − radiated."
 )
 
 # --- Details ---
