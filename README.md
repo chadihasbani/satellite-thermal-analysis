@@ -84,9 +84,10 @@ Full detail: [`docs/MODEL.md`](docs/MODEL.md).
 | --- | --- |
 | Orbit / numerics | altitude, beta angle, orbit count, time step |
 | Thermal scenario | Nominal, Hot screening, Cold screening, or Custom |
+| Spacecraft configuration | Legacy V1 areas, 0.1 m cube, CDS-inspired 1U/3U, or Custom |
 | Model | legacy fixed areas or enhanced face solar + attitude |
 | Attitude (enhanced) | fixed inertial, nadir-pointing, Sun-pointing |
-| Body (enhanced) | length / width / height |
+| Body (enhanced) | length / width / height (from configuration or Custom) |
 | Internal power | constant or scheduled (standby / nominal / high illustrative levels) |
 | Thermal mass | mass, specific heat, initial temperature |
 | Optics | solar absorptivity α, IR emissivity ε |

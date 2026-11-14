@@ -96,7 +96,28 @@ assumptions and using higher/lower illustrative dissipation in Hot/Cold
 presets. EOL coating changes are intentionally **not** applied by the
 presets (geometry/optics remain user-controlled).
 
-### 3d. Cottingham — Spacecraft Thermal Control lecture (ENAE 691)
+### 3d. Cal Poly CubeSat Design Specification (CDS) Rev 14.1
+
+- Organization: California Polytechnic State University (Cal Poly), CubeSat Program
+- Document: CubeSat Design Specification, Revision 14.1 (February 2022)
+- PDF (NASA-hosted copy):
+  https://www.nasa.gov/wp-content/uploads/2018/01/cubesatdesignspecificationrev14_12022-02-09.pdf
+- Project site: http://www.cubesat.org/
+
+Rev 14.1 Table 1 lists typical maximum masses (1U 2.00 kg; 3U 6.00 kg). Section
+2.2 / Appendix B define mechanical envelopes (1U 100×100×113.5 mm; 3U
+100×100×340.5 mm along the rails). These are **specification limits / envelopes**,
+not measured properties of a particular flight vehicle. The CDS does **not**
+specify effective specific heat or coating optical properties for thermal analysis.
+
+**Relation to this project:** Checkpoint 5 1U/3U-inspired presets use the CDS
+Rev 14.1 envelope dimensions and cite Table 1 max-mass notes. Model masses
+(1.50 kg / 4.00 kg) and `cp = 900 J/(kg·K)` are illustrative educational
+assumptions chosen below those maxima. The rectangular bus is an idealized
+radiating geometry for face-based heating/cooling, not an exact exposed
+flight-hardware surface model.
+
+### 3e. Cottingham — Spacecraft Thermal Control lecture (ENAE 691)
 
 - NTRS PDF: https://ntrs.nasa.gov/api/citations/20230001953/downloads/ENAE%20691%20Spring23%20Thermal%20Cottingham.pdf
 - Accessed for Checkpoint 2.

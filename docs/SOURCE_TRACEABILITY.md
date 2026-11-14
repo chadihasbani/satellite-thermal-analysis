@@ -92,6 +92,14 @@ NASA/ESA endorsement or experimental validation of the software.
 - Scenario-compare and other GUI modes covered by tests.
 - Legacy A/B/C finals under Nominal remain −12.5661 / −6.8313 / −4.5386 °C.
 
+### Checkpoint 5
+
+- 1U/3U envelope dimensions and typical max masses from Cal Poly CDS Rev 14.1 (`tests/test_spacecraft_configurations.py`).
+- Face areas derived from L×W×H; enhanced radiation/solar use the same six faces; visual wings excluded.
+- Illustrative masses/cp/α/ε are labelled separately from CDS envelope data; CDS max mass is a limit, not the model mass.
+- Spacecraft-preset GUI fields lock/sync; Custom is identity; scenario-compare shares one bus across Cold/Nominal/Hot.
+- Legacy simplified configuration still reproduces V1 A/B/C finals.
+
 ## Known limitations
 
 - Using a published beta/eclipse or solar-heating discussion does not validate this code as flight software.
@@ -101,3 +109,4 @@ NASA/ESA endorsement or experimental validation of the software.
 - Eclipse entry/exit for `eclipse_reduced` remain step-sampled (not power-event splits).
 - Interactive GUI runs refuse estimates above `MAX_GUI_SAMPLES`; scripts may pass a higher `max_samples` or omit it.
 - Hot/Cold presets are educational screening cases, not mission-qualified worst cases; they omit EOL optical degradation and ERBE time-constant pairing.
+- CubeSat-inspired presets are not operational satellites; the rectangular CDS envelope is an idealized radiating geometry, not exact exposed flight-hardware surfaces; tuna-can/deployable volume omitted; effective cp is lumped/illustrative.

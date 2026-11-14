@@ -12,6 +12,7 @@ from satellite_thermal.gui_support import (
     GuiRunRequest,
     SCENARIO_COMPARE_MODE,
     all_curves,
+    apply_spacecraft_configuration,
     apply_thermal_scenario,
     changed_parameter_rows,
     clamp_sample_index,
@@ -37,6 +38,14 @@ from satellite_thermal.gui_support import (
     temperature_history_csv,
     temperature_metrics_c,
     validate_gui_request,
+)
+from satellite_thermal.spacecraft_configurations import (
+    SpacecraftConfigurationId,
+    build_spacecraft_configuration,
+    configuration_controlled_field_names,
+    configuration_controls_locked,
+    configuration_select_options,
+    sync_session_values_from_configuration,
 )
 from satellite_thermal.thermal_scenarios import (
     ThermalScenarioId,
@@ -281,6 +290,13 @@ TERM_HELP = {
         "as constant loads), not universal spacecraft worst cases. Custom "
         "re-enables full editing with no hidden overrides."
     ),
+    "spacecraft_configuration": (
+        "Spacecraft presets set body dimensions, mass, effective specific heat, "
+        "optics, thermal-model kind, and related area fields. CubeSat envelopes "
+        "follow CDS Rev 14.1; masses and cp used here are illustrative unless "
+        "labelled otherwise. Visual solar wings are not thermal surfaces. "
+        "Custom unlocks full geometry editing with no hidden overrides."
+    ),
 }
 
 MODE_LABELS = {
@@ -306,6 +322,14 @@ def _init_state() -> None:
         st.session_state.gui_thermal_scenario = ThermalScenarioId.CUSTOM.value
     if "_scenario_sync_id" not in st.session_state:
         st.session_state._scenario_sync_id = st.session_state.gui_thermal_scenario
+    if "gui_spacecraft_configuration" not in st.session_state:
+        st.session_state.gui_spacecraft_configuration = (
+            SpacecraftConfigurationId.CUSTOM.value
+        )
+    if "_configuration_sync_id" not in st.session_state:
+        st.session_state._configuration_sync_id = (
+            st.session_state.gui_spacecraft_configuration
+        )
     defaults = default_gui_request()
     for field, value in defaults.__dict__.items():
         key = f"gui_{field}"
@@ -319,6 +343,10 @@ def _apply_defaults() -> None:
         st.session_state[f"gui_{field}"] = value
     st.session_state.gui_thermal_scenario = ThermalScenarioId.CUSTOM.value
     st.session_state._scenario_sync_id = ThermalScenarioId.CUSTOM.value
+    st.session_state.gui_spacecraft_configuration = (
+        SpacecraftConfigurationId.CUSTOM.value
+    )
+    st.session_state._configuration_sync_id = SpacecraftConfigurationId.CUSTOM.value
 
 
 def _mode_blurb(mode: str) -> str:
@@ -338,8 +366,8 @@ def _mode_blurb(mode: str) -> str:
         ),
         "scenario_compare": (
             "Compare Cold, Nominal, and Hot screening overlays on the same "
-            "spacecraft settings. Presets change environment and constant "
-            "internal power only — not coatings or geometry."
+            "spacecraft configuration. Environmental presets change fluxes, "
+            "beta, and constant internal power — not the selected bus geometry."
         ),
     }[mode]
 
@@ -468,8 +496,45 @@ with st.sidebar:
     elif mode == "scenario_compare":
         st.caption(
             "Runs Cold, Nominal, and Hot screening overlays together. "
-            "Spacecraft geometry and coatings come from the sidebar; "
-            "each curve applies its own environment and constant internal power."
+            "Spacecraft geometry and coatings come from the spacecraft "
+            "configuration; each curve applies its own environment and "
+            "constant internal power."
+        )
+
+    st.markdown("#### Spacecraft configuration")
+    config_options = configuration_select_options()
+    config_ids = [item[0] for item in config_options]
+    config_labels = {item[0]: item[1] for item in config_options}
+    configuration_id = st.selectbox(
+        "Bus / spacecraft preset",
+        options=config_ids,
+        format_func=lambda value: config_labels[value],
+        key="gui_spacecraft_configuration",
+        help=TERM_HELP["spacecraft_configuration"],
+    )
+    config_locked = configuration_controls_locked(configuration_id)
+    if configuration_id != st.session_state.get("_configuration_sync_id"):
+        updates = sync_session_values_from_configuration(configuration_id)
+        for key, value in updates.items():
+            st.session_state[key] = value
+        st.session_state._configuration_sync_id = configuration_id
+    if config_locked:
+        config_definition = build_spacecraft_configuration(configuration_id)
+        st.caption(config_definition.summary)
+        st.dataframe(
+            config_definition.parameter_rows(),
+            hide_index=True,
+            use_container_width=True,
+        )
+        st.caption(
+            "Locked spacecraft fields: "
+            + ", ".join(configuration_controlled_field_names())
+            + ". Visual solar wings remain decorative only."
+        )
+    else:
+        st.caption(
+            "Custom mode: edit geometry, mass, effective cp, optics, and areas "
+            "below. No hidden spacecraft overrides."
         )
 
     st.markdown("#### Thermal scenario")
@@ -574,6 +639,7 @@ with st.sidebar:
         ),
         key="gui_thermal_model",
         help=TERM_HELP["thermal_model"],
+        disabled=config_locked,
     )
     st.selectbox(
         "Attitude mode",
@@ -633,6 +699,7 @@ with st.sidebar:
         step=0.01,
         key="gui_absorptivity",
         help=TERM_HELP["alpha"],
+        disabled=config_locked,
     )
     st.slider(
         "IR emissivity ε (= α_ir)",
@@ -641,6 +708,7 @@ with st.sidebar:
         step=0.01,
         key="gui_emissivity",
         help=TERM_HELP["epsilon"],
+        disabled=config_locked,
     )
 
     st.markdown("#### Environment")
@@ -669,64 +737,89 @@ with st.sidebar:
         )
 
     with st.expander("Advanced parameters"):
-        st.number_input("Mass (kg)", min_value=0.1, step=0.5, key="gui_mass_kg")
+        st.number_input(
+            "Mass (kg)",
+            min_value=0.1,
+            step=0.5,
+            key="gui_mass_kg",
+            disabled=config_locked,
+        )
         st.number_input(
             "Specific heat cp (J/(kg·K))",
             min_value=1.0,
             step=50.0,
             key="gui_specific_heat_j_per_kg_k",
+            disabled=config_locked,
+            help=(
+                "Effective lumped specific heat for the whole spacecraft "
+                "(electronics, structure, batteries, etc.), not a single "
+                "structural-alloy cp unless Custom justifies that."
+            ),
         )
         st.caption(
-            "Enhanced-mode bus dimensions (legacy ignores these for heating)."
+            "Enhanced-mode bus dimensions drive six exterior face areas. "
+            "Legacy heating ignores dimensions and uses fixed effective areas. "
+            "3D bus proportions always follow these dimensions."
         )
         st.number_input(
             "Body length along +X (m)",
             min_value=1e-3,
             step=0.01,
-            format="%.3f",
+            format="%.4f",
             key="gui_body_length_m",
+            disabled=config_locked,
         )
         st.number_input(
             "Body width along +Y (m)",
             min_value=1e-3,
             step=0.01,
-            format="%.3f",
+            format="%.4f",
             key="gui_body_width_m",
+            disabled=config_locked,
         )
         st.number_input(
             "Body height along +Z (m)",
             min_value=1e-3,
             step=0.01,
-            format="%.3f",
+            format="%.4f",
             key="gui_body_height_m",
+            disabled=config_locked,
         )
         st.number_input(
             "Projected solar area (m²)",
             min_value=1e-4,
-            format="%.4f",
+            format="%.5f",
             key="gui_projected_area_m2",
             help=TERM_HELP["areas"] + " Used in legacy mode only.",
+            disabled=config_locked,
         )
         st.number_input(
             "Radiating area (m²)",
             min_value=1e-4,
-            format="%.4f",
+            format="%.5f",
             key="gui_radiating_area_m2",
-            help=TERM_HELP["areas"] + " Used in legacy mode only.",
+            help=(
+                TERM_HELP["areas"]
+                + " Legacy mode uses this fixed area; enhanced presets sync it "
+                "to total exterior area for display consistency."
+            ),
+            disabled=config_locked,
         )
         st.number_input(
             "Earth-facing area (m²)",
             min_value=1e-4,
-            format="%.4f",
+            format="%.5f",
             key="gui_earth_facing_area_m2",
             help=TERM_HELP["areas"],
+            disabled=config_locked,
         )
         st.number_input(
             "Albedo area (m²)",
             min_value=1e-4,
-            format="%.4f",
+            format="%.5f",
             key="gui_albedo_area_m2",
             help=TERM_HELP["areas"],
+            disabled=config_locked,
         )
         st.number_input(
             "Solar flux S (W/m²)",
@@ -815,11 +908,18 @@ with st.sidebar:
         st.caption("Displayed results update only after a successful run.")
 
 request = _request_from_state()
+active_configuration_id = str(
+    st.session_state.get(
+        "gui_spacecraft_configuration",
+        SpacecraftConfigurationId.CUSTOM.value,
+    )
+)
 active_scenario_id = (
     ThermalScenarioId.CUSTOM.value
     if mode == "scenario_compare"
     else str(st.session_state.get("gui_thermal_scenario", ThermalScenarioId.CUSTOM.value))
 )
+request = apply_spacecraft_configuration(request, active_configuration_id)
 if mode != "scenario_compare":
     request = apply_thermal_scenario(request, active_scenario_id)
 if mode == "environment_compare":
@@ -837,7 +937,7 @@ if run_clicked:
             study = _run_study(mode, request, active_scenario_id)
         st.session_state.study = study
         st.session_state.study_fingerprint = request_fingerprint(
-            mode, request, active_scenario_id
+            mode, request, active_scenario_id, active_configuration_id
         )
         st.session_state.sample_index = 0
         # Default inspection case after each successful solve (Case C in Mode 3).
@@ -870,7 +970,9 @@ if study is None:
 inputs_changed = (
     st.session_state.study_fingerprint is not None
     and st.session_state.study_fingerprint
-    != request_fingerprint(mode, request, active_scenario_id)
+    != request_fingerprint(
+        mode, request, active_scenario_id, active_configuration_id
+    )
 )
 if inputs_changed:
     st.warning(
@@ -1054,8 +1156,10 @@ st.pyplot(temp_fig, clear_figure=True, use_container_width=True)
 st.markdown("### Orbit and thermal state")
 st.caption(
     "The 3D view illustrates orbital position, eclipse status, and the prescribed "
-    "bus orientation used for enhanced solar heating. Craft size is enlarged for "
-    "visibility; wing panels are visual-only and are not thermal surfaces. "
+    "bus orientation used for enhanced solar heating. Absolute craft size is "
+    "enlarged for visibility, but bus box proportions follow the selected "
+    "length/width/height. Wing panels, dish, and thrusters are visual-only and "
+    "are not thermal surfaces (no absorption, emission, or capacitance). "
     "Temperature remains a single-node result."
 )
 if len(curves) > 1:

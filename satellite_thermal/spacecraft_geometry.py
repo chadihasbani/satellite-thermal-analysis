@@ -21,9 +21,11 @@ faces are not double-counted:
 Optical properties may be uniform or face-specific. Solar panels drawn in the
 3D view are illustrative only and are not thermal surfaces in this module.
 
-Classification: body dimensions and uniform optical defaults used here are
-illustrative modelling assumptions (C) unless a later checkpoint cites a
-published spacecraft specification.
+Classification: uniform optical defaults remain illustrative modelling
+assumptions (C). Checkpoint 5 may supply CDS Rev 14.1 envelope dimensions for
+CubeSat-inspired presets; masses and effective cp used with those envelopes are
+still illustrative unless labelled otherwise. Visual solar panels are never
+thermal faces.
 """
 
 from __future__ import annotations

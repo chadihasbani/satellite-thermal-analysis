@@ -772,3 +772,63 @@ conditions. Custom mode leaves sidebar values unchanged.
   settings (mass, coatings, areas, altitude, step, thermal model, attitude).
 - Existing single, reference-compare, and A/B/C environment modes remain and
   may optionally apply one preset overlay before solving.
+
+## Version 2.0 — Checkpoint 5: CubeSat-inspired configurations
+
+### CDS mechanical envelopes (sourced)
+
+Cal Poly **CubeSat Design Specification (CDS) Rev 14.1** (February 2022) defines
+form-factor envelopes and typical maximum masses (Table 1 / Appendix B):
+
+| Form factor | Envelope (mm) | Typical max mass (kg) |
+| --- | --- | --- |
+| 1U | 100.0 × 100.0 × 113.5 | 2.00 |
+| 3U | 100.0 × 100.0 × 340.5 | 6.00 |
+
+PDF: https://www.nasa.gov/wp-content/uploads/2018/01/cubesatdesignspecificationrev14_12022-02-09.pdf
+
+The 100 mm cross-section is the rail envelope; Z includes rail/standoff extent
+beyond a naïve 100 mm “unit cube.” Extra “tuna can” volume for some 3U
+dispensers is **not** modelled here.
+
+**Idealized radiating geometry.** The rectangular L×W×H bus used for face solar
+absorption and face-sum radiation is an **idealized closed envelope**, not an
+exact representation of exposed flight-hardware surfaces (rails, gaps,
+connectors, antennas, multi-layer insulation layups, or deployables). Exterior
+area in this model equals the six faces of that rectangular prism.
+
+### Configurations in this repository
+
+| Preset | Dimensions | Mass used here | Thermal model | Classification |
+| --- | --- | --- | --- | --- |
+| Legacy simplified | 0.1 m cube (viz) | 5 kg | Legacy fixed areas 0.01 / 0.06 m² | Repo V1 educational (C) |
+| Illustrative 0.1 m cube | 0.1 × 0.1 × 0.1 m | 5 kg | Enhanced; A_rad = 0.06 m² | Illustrative (C) |
+| Generic 1U-inspired | CDS 1U envelope | 1.50 kg (under 2.00 kg max) | Enhanced; areas from faces | Envelope (B); mass/cp/α/ε (C) |
+| Generic 3U-inspired | CDS 3U envelope | 4.00 kg (under 6.00 kg max) | Enhanced; areas from faces | Envelope (B); mass/cp/α/ε (C) |
+| Custom | User | User | User | User |
+
+Effective `cp = 900 J/(kg·K)` is a **lumped** whole-spacecraft approximation
+(structure + electronics + batteries, etc.), **not** derived from aluminium
+rail material alone and **not** specified by the CDS.
+
+### Derived exterior areas
+
+For length `l`, width `w`, height `h` along body +X/+Y/+Z:
+
+```text
+A_±x = w h
+A_±y = l h
+A_±z = l w
+A_total = 2 (w h + l h + l w)
+```
+
+Enhanced solar heating sums face contributions `α_i S A_i max(0, n_i·s)`.
+Enhanced radiation sums `ε_i σ A_i T⁴` over the same six faces (no
+double-counting). Visual solar wings remain decorative only.
+
+### GUI behaviour
+
+Spacecraft presets lock and synchronize dimensions, mass, effective cp, optics,
+thermal-model kind, and related area fields so the sidebar cannot contradict
+the solver. Custom unlocks editing. Hot/Nominal/Cold scenario compare continues
+to share one spacecraft configuration across all three environmental cases.

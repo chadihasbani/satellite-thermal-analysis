@@ -33,6 +33,12 @@ from satellite_thermal.orbital_simulation import (
 )
 from satellite_thermal.parameters import Phase1Parameters
 from satellite_thermal.spacecraft_geometry import RectangularBusGeometry
+from satellite_thermal.spacecraft_configurations import (
+    SpacecraftConfigurationId,
+    build_spacecraft_configuration,
+    configuration_overlay_fields,
+    parse_spacecraft_configuration_id,
+)
 from satellite_thermal.thermal_scenarios import (
     SCENARIO_CASE_COLD,
     SCENARIO_CASE_HOT,
@@ -373,12 +379,33 @@ def request_fingerprint(
     mode: str,
     request: GuiRunRequest,
     scenario_id: str = ThermalScenarioId.CUSTOM.value,
+    configuration_id: str = SpacecraftConfigurationId.CUSTOM.value,
 ) -> tuple:
     """Hashable snapshot of the inputs that produced a displayed study."""
     return (
         mode,
         parse_thermal_scenario_id(scenario_id).value,
+        parse_spacecraft_configuration_id(configuration_id).value,
         tuple(sorted(asdict(request).items())),
+    )
+
+
+def apply_spacecraft_configuration(
+    request: GuiRunRequest,
+    configuration_id: str | SpacecraftConfigurationId,
+) -> GuiRunRequest:
+    """Apply a spacecraft preset overlay; ``custom`` leaves the request unchanged.
+
+    Overrides geometry, mass, effective cp, optics, thermal-model kind, and the
+    effective-area fields owned by the preset. Orbit, scenarios, attitude, and
+    power schedules are preserved.
+    """
+    kind = parse_spacecraft_configuration_id(configuration_id)
+    if kind is SpacecraftConfigurationId.CUSTOM:
+        return request
+    definition = build_spacecraft_configuration(kind)
+    return GuiRunRequest(
+        **{**request.__dict__, **configuration_overlay_fields(definition)}
     )
 
 
