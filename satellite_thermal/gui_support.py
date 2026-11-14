@@ -12,6 +12,16 @@ from dataclasses import asdict, dataclass
 from satellite_thermal.albedo import AlbedoParameters
 from satellite_thermal.attitude import AttitudeMode, parse_attitude_mode
 from satellite_thermal.earth_infrared import EarthInfraredParameters
+from satellite_thermal.internal_power import (
+    ILLUSTRATIVE_HIGH_POWER_W,
+    ILLUSTRATIVE_NOMINAL_W,
+    ILLUSTRATIVE_STANDBY_W,
+    InternalPowerSchedule,
+    OperatingModePowers,
+    PowerInterval,
+    PowerScheduleKind,
+    parse_power_schedule_kind,
+)
 from satellite_thermal.orbit import CircularOrbit, orbital_period_s
 from satellite_thermal.orbital_simulation import (
     THERMAL_MODEL_ENHANCED,
@@ -27,6 +37,7 @@ from satellite_thermal.units import kelvin_to_celsius
 from satellite_thermal.validation import require_positive
 
 # Soft cap so the GUI stays responsive for interactive runs.
+# Includes nominal Euler samples plus scheduled power-event splits.
 MAX_GUI_SAMPLES = 250_000
 ABSOLUTE_ZERO_C = -273.15
 
@@ -59,6 +70,13 @@ class GuiRunRequest:
     body_length_m: float = 0.1
     body_width_m: float = 0.1
     body_height_m: float = 0.1
+    power_schedule_kind: str = PowerScheduleKind.CONSTANT.value
+    standby_power_w: float = ILLUSTRATIVE_STANDBY_W
+    nominal_power_w: float = ILLUSTRATIVE_NOMINAL_W
+    high_power_w: float = ILLUSTRATIVE_HIGH_POWER_W
+    periodic_period_s: float = 600.0
+    periodic_high_duration_s: float = 120.0
+    custom_intervals_text: str = ""
 
 
 def default_gui_request() -> GuiRunRequest:
@@ -88,6 +106,13 @@ def default_gui_request() -> GuiRunRequest:
         body_length_m=0.1,
         body_width_m=0.1,
         body_height_m=0.1,
+        power_schedule_kind=PowerScheduleKind.CONSTANT.value,
+        standby_power_w=ILLUSTRATIVE_STANDBY_W,
+        nominal_power_w=ILLUSTRATIVE_NOMINAL_W,
+        high_power_w=ILLUSTRATIVE_HIGH_POWER_W,
+        periodic_period_s=600.0,
+        periodic_high_duration_s=120.0,
+        custom_intervals_text="",
     )
 
 
@@ -100,6 +125,114 @@ def geometry_from_request(request: GuiRunRequest) -> RectangularBusGeometry:
         absorptivity=request.absorptivity,
         emissivity=request.emissivity,
     ).validated()
+
+
+def parse_custom_intervals_text(text: str) -> tuple[PowerInterval, ...]:
+    """Parse ``start,end,power`` rows separated by ``;`` or newlines."""
+    raw = str(text).strip()
+    if not raw:
+        return ()
+    chunks = []
+    for part in raw.replace("\n", ";").split(";"):
+        piece = part.strip()
+        if piece:
+            chunks.append(piece)
+    intervals: list[PowerInterval] = []
+    for index, chunk in enumerate(chunks):
+        fields = [item.strip() for item in chunk.split(",")]
+        if len(fields) != 3:
+            raise ValueError(
+                "Each custom interval must be 'start_s,end_s,power_w'. "
+                f"Bad entry #{index + 1}: {chunk!r}."
+            )
+        intervals.append(
+            PowerInterval(
+                start_s=float(fields[0]),
+                end_s=float(fields[1]),
+                power_w=float(fields[2]),
+                label=f"interval_{index + 1}",
+            )
+        )
+    return tuple(intervals)
+
+
+def power_schedule_from_request(request: GuiRunRequest) -> InternalPowerSchedule:
+    """Build the validated internal-power schedule from GUI fields."""
+    kind = parse_power_schedule_kind(request.power_schedule_kind)
+    mode_powers = OperatingModePowers(
+        standby_w=request.standby_power_w,
+        nominal_w=request.nominal_power_w,
+        high_power_w=request.high_power_w,
+    ).validated()
+    if kind is PowerScheduleKind.CONSTANT:
+        return InternalPowerSchedule(
+            kind=kind.value,
+            constant_power_w=request.internal_heat_w,
+        ).validated()
+    if kind is PowerScheduleKind.ECLIPSE_REDUCED:
+        return InternalPowerSchedule(
+            kind=kind.value,
+            sunlight_power_w=mode_powers.nominal_w,
+            eclipse_power_w=mode_powers.standby_w,
+            constant_power_w=request.internal_heat_w,
+        ).validated()
+    if kind is PowerScheduleKind.PERIODIC_HIGH:
+        return InternalPowerSchedule(
+            kind=kind.value,
+            base_power_w=mode_powers.nominal_w,
+            high_power_w=mode_powers.high_power_w,
+            period_s=request.periodic_period_s,
+            high_duration_s=request.periodic_high_duration_s,
+            constant_power_w=request.internal_heat_w,
+        ).validated()
+    return InternalPowerSchedule(
+        kind=PowerScheduleKind.CUSTOM_INTERVALS.value,
+        constant_power_w=request.internal_heat_w,
+        intervals=parse_custom_intervals_text(request.custom_intervals_text),
+    ).validated()
+
+
+def count_scheduled_power_events(
+    schedule: InternalPowerSchedule,
+    duration_s: float,
+) -> int:
+    """Upper-bound count of schedule discontinuities in ``(0, duration_s)``.
+
+    Used for GUI sample estimation. ``constant`` and ``eclipse_reduced``
+    contribute zero schedule events (eclipse edges remain step-sampled).
+    """
+    settings = schedule.validated()
+    duration = require_positive("duration_s", duration_s)
+    kind = parse_power_schedule_kind(settings.kind)
+    if kind in (PowerScheduleKind.CONSTANT, PowerScheduleKind.ECLIPSE_REDUCED):
+        return 0
+    if kind is PowerScheduleKind.PERIODIC_HIGH:
+        if settings.high_duration_s <= 0.0 or settings.high_duration_s >= settings.period_s:
+            return 0
+        # At most two events per period (high start and high end).
+        periods = math.ceil(duration / settings.period_s)
+        return int(2 * periods)
+    edges: set[float] = set()
+    for interval in settings.intervals:
+        if 0.0 < interval.start_s < duration:
+            edges.add(interval.start_s)
+        if 0.0 < interval.end_s < duration:
+            edges.add(interval.end_s)
+    return len(edges)
+
+
+def estimate_gui_sample_count(request: GuiRunRequest) -> int:
+    """Conservative sample-count estimate including power-event splits."""
+    orbit = CircularOrbit(
+        altitude_m=request.altitude_km * 1000.0,
+        beta_rad=math.radians(request.beta_deg),
+    ).validated()
+    duration_s = request.orbit_count * orbital_period_s(orbit)
+    # Nominal Euler samples, plus a small margin for the final instant.
+    base_samples = int(math.floor(duration_s / request.time_step_s)) + 2
+    schedule = power_schedule_from_request(request)
+    event_samples = count_scheduled_power_events(schedule, duration_s)
+    return base_samples + event_samples
 
 
 def build_model_inputs(request: GuiRunRequest) -> tuple[
@@ -194,21 +327,37 @@ def validate_gui_request(request: GuiRunRequest) -> GuiRunRequest:
     for dim_name in ("body_length_m", "body_width_m", "body_height_m"):
         if getattr(request, dim_name) <= 0.0:
             raise ValueError(f"{dim_name} must be greater than 0.")
+    for power_name in ("standby_power_w", "nominal_power_w", "high_power_w"):
+        if getattr(request, power_name) < 0.0:
+            raise ValueError(f"{power_name} must be >= 0.")
+    if request.periodic_period_s <= 0.0:
+        raise ValueError("periodic_period_s must be greater than 0.")
+    if request.periodic_high_duration_s < 0.0:
+        raise ValueError("periodic_high_duration_s must be >= 0.")
+    # Validate schedule construction (overlaps, kinds, etc.).
+    power_schedule_from_request(request)
 
-    # Estimate sample count using the same orbit helper the solver uses.
-    orbit = CircularOrbit(
-        altitude_m=request.altitude_km * 1000.0,
-        beta_rad=math.radians(request.beta_deg),
-    ).validated()
-    duration_s = request.orbit_count * orbital_period_s(orbit)
-    estimated_samples = int(duration_s / request.time_step_s) + 1
+    # Include scheduled power-event splits in the interactive sample budget.
+    estimated_samples = estimate_gui_sample_count(request)
     if estimated_samples > MAX_GUI_SAMPLES:
         raise ValueError(
             "Requested run is too large for interactive use "
-            f"(~{estimated_samples:,} samples; limit {MAX_GUI_SAMPLES:,}). "
-            "Increase the time step or reduce the number of orbits."
+            f"(~{estimated_samples:,} samples including power-event splits; "
+            f"limit {MAX_GUI_SAMPLES:,}). "
+            "Increase the time step, reduce the number of orbits, lengthen the "
+            "periodic period, or reduce custom power intervals. "
+            "The GUI does not silently truncate incomplete runs."
         )
     return request
+
+
+def clamp_sample_index(n_samples: int, index: int) -> int:
+    """Clamp a sample index into ``[0, n_samples - 1]``."""
+    if isinstance(n_samples, bool) or not isinstance(n_samples, int) or n_samples <= 0:
+        raise ValueError(f"n_samples must be a positive integer, got {n_samples!r}.")
+    if isinstance(index, bool) or not isinstance(index, int):
+        raise ValueError(f"index must be an integer, got {index!r}.")
+    return max(0, min(index, n_samples - 1))
 
 
 def request_fingerprint(mode: str, request: GuiRunRequest) -> tuple:
@@ -238,6 +387,8 @@ def run_gui_simulation(request: GuiRunRequest) -> OrbitalThermalResult:
         thermal_model=model,
         geometry=geometry,
         attitude_mode=request.attitude_mode,
+        power_schedule=power_schedule_from_request(request),
+        max_samples=MAX_GUI_SAMPLES,
     )
 
 
@@ -309,6 +460,13 @@ _PARAMETER_LABELS = {
     "body_length_m": "Body length (m)",
     "body_width_m": "Body width (m)",
     "body_height_m": "Body height (m)",
+    "power_schedule_kind": "Internal power schedule",
+    "standby_power_w": "Standby power (W)",
+    "nominal_power_w": "Nominal power (W)",
+    "high_power_w": "High power (W)",
+    "periodic_period_s": "Periodic high period (s)",
+    "periodic_high_duration_s": "Periodic high duration (s)",
+    "custom_intervals_text": "Custom power intervals",
 }
 
 _ENV_HEATING_LABELS = {
@@ -757,20 +915,28 @@ def all_curves(study: CompletedGuiStudy) -> tuple[NamedResult, ...]:
 
 
 def temperature_history_csv(curves: tuple[NamedResult, ...]) -> str:
-    """CSV text for one or more temperature histories."""
-    lines = ["case,time_s,time_min,temperature_c,in_eclipse"]
+    """CSV text for one or more temperature histories, including Q_internal(t)."""
+    lines = [
+        "case,time_s,time_min,temperature_c,in_eclipse,"
+        "q_internal_w,internal_power_state"
+    ]
     for curve in curves:
+        schedule = power_schedule_from_request(curve.request)
         for time_s, temp_k, eclipsed in zip(
             curve.result.time_s,
             curve.result.temperature_k,
             curve.result.in_eclipse,
         ):
+            q_internal = schedule.power_w_at(time_s, bool(eclipsed))
+            state = schedule.state_label_at(time_s, bool(eclipsed))
             lines.append(
                 f"{_csv_escape(curve.name)},"
                 f"{time_s:.6f},"
                 f"{time_s / 60.0:.6f},"
                 f"{kelvin_to_celsius(temp_k):.6f},"
-                f"{int(bool(eclipsed))}"
+                f"{int(bool(eclipsed))},"
+                f"{q_internal:.6f},"
+                f"{_csv_escape(state)}"
             )
     return "\n".join(lines) + "\n"
 

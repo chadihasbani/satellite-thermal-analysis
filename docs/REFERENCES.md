@@ -92,9 +92,12 @@ modelling, and numerical energy-balance approaches for small satellites.
 | Earth Bond albedo `a` | 0.30 | Nominal global-mean albedo class value |
 | Earth OLR `E_olr` | 240 W/m² | Illustrative TOA outgoing longwave magnitude |
 | `alpha`, `epsilon` | 0.60, 0.80 | Assumed coating-like optical properties |
+| Internal power (constant) | 5 W | Version 1.0 educational default |
+| Standby / nominal / high | 1 / 5 / 15 W | Checkpoint 3 illustrative operating levels only |
 
 These defaults are documented modelling choices for this repository. They are
-**not** “official NASA design inputs” for a specific spacecraft.
+**not** “official NASA design inputs” for a specific spacecraft. Scheduled
+internal-power profiles do **not** represent a real electrical power subsystem.
 
 ## Unavailable / unused
 

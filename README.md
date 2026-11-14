@@ -66,7 +66,9 @@ Orbit period uses a circular Keplerian formula. Eclipse uses a cylindrical
 Earth-shadow test with selectable orbital beta angle (default β = 0° preserves
 the Version 1.0 reference). An optional **enhanced** thermal mode replaces the
 fixed solar projected area with six bus-face contributions under a prescribed
-attitude; legacy fixed-area mode remains the default. Time integration is
+attitude; legacy fixed-area mode remains the default. Internal heat may be
+constant (Version 1.0 default) or follow illustrative time-dependent schedules
+(eclipse-reduced, periodic high-power, or custom intervals). Time integration is
 **explicit Euler**.
 
 Full detail: [`docs/MODEL.md`](docs/MODEL.md).
@@ -81,6 +83,7 @@ Full detail: [`docs/MODEL.md`](docs/MODEL.md).
 | Model | legacy fixed areas or enhanced face solar + attitude |
 | Attitude (enhanced) | fixed inertial, nadir-pointing, Sun-pointing |
 | Body (enhanced) | length / width / height |
+| Internal power | constant or scheduled (standby / nominal / high illustrative levels) |
 | Thermal mass | mass, specific heat, initial temperature |
 | Optics | solar absorptivity α, IR emissivity ε |
 | Areas | projected, radiating, Earth-facing, albedo areas (legacy / planetary) |

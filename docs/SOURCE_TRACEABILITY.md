@@ -52,7 +52,10 @@ NASA/ESA endorsement or experimental validation of the software.
 
 | Item | Value / Equation | Units | Classification | Source | Specific reference | Implementation notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Internal power | 5 W constant | W | C | Illustrative dissipation | — | Time-dependent schedules deferred to Checkpoint 3 |
+| Constant internal power (V1 default) | 5 W | W | C | Illustrative dissipation | Matches prior Phase 1–5 educational default | `power_schedule_kind=constant` |
+| Standby / nominal / high illustrative levels | 1 / 5 / 15 W | W | C | Project educational assumptions | **Not** a manufacturer datasheet or NASA requirement | Used by eclipse-reduced and periodic schedules |
+| `Q_internal(t)` | Schedule evaluation at Euler step start | W | D | Project implementation | Same timing convention as eclipse-gated solar | No battery / EPS model |
+| Power-event step splitting | Shorten Euler step to next periodic/custom boundary | s | D | Project numerical method | Half-open schedule edges; max step = user `dt` | Does **not** event-split eclipse_reduced boundaries |
 | Hot/cold scenarios | — | — | — | — | — | Checkpoint 4 |
 
 ## Verification notes
@@ -71,9 +74,19 @@ NASA/ESA endorsement or experimental validation of the software.
 - GUI modes propagate `thermal_model` / `attitude_mode` / body dimensions (Reference case in spacecraft-settings compare stays on defaults).
 - 3D bus axes use the same `body_axes_inertial` helper as the solar calculation; wings labelled visual-only.
 
+### Checkpoint 3
+
+- Constant schedule reproduces V1 baselines; zero / periodic / eclipse-reduced / custom overlap rejection tested (`tests/test_internal_power.py`).
+- Eclipse-reduced uses the cylindrical shadow flag (including beta); eclipse edges are sampled, not event-split.
+- Periodic/custom schedules use event-aware step splitting; off-grid 100 W pulse on `[1, 2)` with `dt = 5` s retains ~95 J *additional* energy over a 5 W baseline `(100 − 5) × 1 s` and agrees with finer steps.
+- Heat-flow panel and CSV `q_internal_w` match the schedule used by the integrator.
+- GUI time control uses sample-index selection over irregular stored times; validation counts power-event splits against `MAX_GUI_SAMPLES` and refuses truncated runs.
+
 ## Known limitations
 
 - Using a published beta/eclipse or solar-heating discussion does not validate this code as flight software.
 - Planetary IR/albedo geometry is still the V1 effective-area model.
 - Penumbra and finite Sun angular size are omitted.
 - Prescribed attitudes are not ACS dynamics; solar panels in the 3D view are not thermal faces.
+- Eclipse entry/exit for `eclipse_reduced` remain step-sampled (not power-event splits).
+- Interactive GUI runs refuse estimates above `MAX_GUI_SAMPLES`; scripts may pass a higher `max_samples` or omit it.

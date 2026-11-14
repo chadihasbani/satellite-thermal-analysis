@@ -17,6 +17,10 @@ from satellite_thermal.albedo import AlbedoParameters, albedo_heat_w_at_time
 from satellite_thermal.attitude import AttitudeMode, body_axes_inertial, parse_attitude_mode
 from satellite_thermal.earth_infrared import EarthInfraredParameters
 from satellite_thermal.heat_transfer import radiative_cooling, solar_heating
+from satellite_thermal.internal_power import (
+    InternalPowerSchedule,
+    constant_power_schedule,
+)
 from satellite_thermal.orbit import (
     CircularOrbit,
     orbital_period_s,
@@ -53,6 +57,7 @@ class HeatFlowSnapshot:
     q_internal_w: float
     q_radiated_w: float
     q_net_w: float
+    internal_power_state: str = "constant"
 
 
 def heat_flow_at_index(
@@ -67,6 +72,7 @@ def heat_flow_at_index(
     thermal_model: str = THERMAL_MODEL_LEGACY,
     geometry: RectangularBusGeometry | None = None,
     attitude_mode: str | AttitudeMode = AttitudeMode.FIXED_INERTIAL,
+    power_schedule: InternalPowerSchedule | None = None,
 ) -> HeatFlowSnapshot:
     """Evaluate every energy-balance term at result sample `index`."""
     if index < 0 or index >= len(result.time_s):
@@ -114,7 +120,13 @@ def heat_flow_at_index(
         if include_albedo
         else 0.0
     )
-    q_internal = settings.internal_heat_w
+    schedule = (
+        power_schedule.validated()
+        if power_schedule is not None
+        else constant_power_schedule(settings.internal_heat_w)
+    )
+    q_internal = schedule.power_w_at(time_s, in_eclipse)
+    power_state = schedule.state_label_at(time_s, in_eclipse)
     q_net = q_solar + q_earth_ir + q_albedo + q_internal - q_radiated
     return HeatFlowSnapshot(
         time_s=time_s,
@@ -127,6 +139,7 @@ def heat_flow_at_index(
         q_internal_w=q_internal,
         q_radiated_w=q_radiated,
         q_net_w=q_net,
+        internal_power_state=power_state,
     )
 
 

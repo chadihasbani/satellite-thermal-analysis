@@ -648,3 +648,70 @@ Face solar heating `Q = α S A max(0, n·s)` follows the standard projected-area
 / incidence-angle form used in small-satellite thermal notes (e.g. NASA
 SmallSat Institute materials and Cottingham / TFAWS on-orbit environment
 lectures). See [`SOURCE_TRACEABILITY.md`](SOURCE_TRACEABILITY.md).
+
+## Version 2.0 — Checkpoint 3: time-dependent internal power
+
+### Energy balance
+
+```text
+m * cp * dT/dt = Q_solar(t) + Q_earth_ir(t) + Q_albedo(t) + Q_internal(t) - Q_radiated(t)
+```
+
+`Q_internal(t)` is evaluated at the **start** of each explicit Euler step, using
+the same time and eclipse flag as solar gating.
+
+### Schedule kinds
+
+| Kind | Rule |
+| --- | --- |
+| `constant` | `Q_internal =` GUI Internal heat (W); default 5 W (V1) |
+| `eclipse_reduced` | sunlight → nominal W; eclipse → standby W (actual β-aware eclipse) |
+| `periodic_high` | within each period `[nP,(n+1)P)`, high on `[nP, nP+D)`, else base |
+| `custom_intervals` | half-open `[start,end)`; no overlaps; else baseline Internal heat |
+
+### Numerical note (Euler discontinuities)
+
+Explicit Euler still holds all loads constant over a completed step, and the
+user-selected `time_step_s` remains the **maximum** step.
+
+For `periodic_high` and `custom_intervals`, the integrator queries
+`next_scheduled_transition_s` and **shortens** a step that would cross a known
+power discontinuity so the next sample begins exactly on the half-open
+boundary. That prevents short off-grid pulses (for example a 1 s pulse inside a
+5 s nominal step) from being skipped. Remaining time after the event continues
+with the updated `Q_internal` under the same maximum-step limit.
+
+**Pulse energy terminology.** A scheduled pulse that sets total internal power to
+100 W for one second while the baseline schedule is 5 W contributes
+`(100 − 5) × 1 s = 95 J` of *additional* energy relative to the baseline (not
+100 J). The absolute energy delivered by the pulse interval itself is
+`100 W × 1 s = 100 J`. Independent off-grid checks in this repository report the
+additional 95 J figure so temperature deltas can be compared against
+`ΔE / (m · cp)`.
+
+`constant` schedules take the ordinary fixed-step path (Version 1.0 baselines
+unchanged).
+
+`eclipse_reduced` still uses the **sampled** cylindrical-eclipse flag at each
+step start. Eclipse entry/exit are **not** treated as separate schedule events
+in Checkpoint 3; resolving them remains an orbital time-step approximation
+(same class of limitation as the legacy solar eclipse gate).
+
+### GUI sample inspection and resource limits
+
+Event-aware stepping produces **nonuniform** timestamps. The Streamlit time
+control therefore selects a **stored sample index** (with physical time
+readouts) so every power-transition sample remains reachable. Instantaneous
+heat-flow, power-state, temperature marker, and 3D views stay synchronized to
+that index on the inspected curve.
+
+Interactive runs estimate samples as nominal Euler count **plus** scheduled
+power-event splits, and reject requests above `MAX_GUI_SAMPLES` (250 000). The
+solver also enforces `max_samples` at runtime and raises rather than returning a
+truncated history that could be mistaken for a complete orbit set.
+
+### Illustrative power levels
+
+Default standby / nominal / high-power values (1 / 5 / 15 W) are **illustrative
+assumptions (C)**, not a published spacecraft power budget. No battery or EPS
+model is included.
