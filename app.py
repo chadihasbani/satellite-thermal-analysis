@@ -638,9 +638,10 @@ with viz_left:
         config={
             "displayModeBar": True,
             "responsive": True,
-            "scrollZoom": False,
+            "scrollZoom": True,
         },
     )
+    st.caption("Scroll to zoom · drag to rotate · double-click to reset.")
 
 with viz_right:
     status_text = "Eclipsed" if snap.in_eclipse else "Sunlit"

@@ -12,5 +12,6 @@ outputs/*
 !outputs/README.md
 *.png
 !docs/images/*.png
+!assets/*.jpg
 .DS_Store
 Thumbs.db

@@ -7,6 +7,8 @@ from the same CircularOrbit helpers used by the thermal solver.
 from __future__ import annotations
 
 import math
+from functools import lru_cache
+from pathlib import Path
 
 from satellite_thermal.orbit import (
     CircularOrbit,
@@ -20,26 +22,154 @@ from satellite_thermal.orbit import (
 from satellite_thermal.orbital_simulation import OrbitalThermalResult
 from satellite_thermal.units import kelvin_to_celsius
 
+_EARTH_MAP_PATH = Path(__file__).resolve().parents[1] / "assets" / "earth_map.jpg"
 
-def _sphere_mesh(radius_m: float, n_lat: int = 24, n_lon: int = 36):
-    """Latitude/longitude mesh for a sphere centered at the origin."""
-    xs: list[list[float]] = []
-    ys: list[list[float]] = []
-    zs: list[list[float]] = []
+
+@lru_cache(maxsize=2)
+def _earth_texture_pixels(
+    mtime_ns: int,
+) -> tuple[int, int, tuple[tuple[int, int, int], ...]]:
+    """Load the equirectangular Earth map once per file revision."""
+    from PIL import Image
+
+    del mtime_ns  # cache key only
+    if not _EARTH_MAP_PATH.is_file():
+        raise FileNotFoundError(f"Earth texture not found: {_EARTH_MAP_PATH}")
+    image = Image.open(_EARTH_MAP_PATH).convert("RGB")
+    width, height = image.size
+    flat = getattr(image, "get_flattened_data", None)
+    pixels = tuple(flat()) if callable(flat) else tuple(image.getdata())
+    return width, height, pixels
+
+
+def _sample_earth_rgb(lon_rad: float, lat_rad: float) -> tuple[int, int, int]:
+    """Sample the Earth map at lon in [0, 2π) and lat in [-π/2, π/2]."""
+    width, height, pixels = _earth_texture_pixels(_EARTH_MAP_PATH.stat().st_mtime_ns)
+    u = (lon_rad / (2.0 * math.pi)) % 1.0
+    v = 0.5 - (lat_rad / math.pi)
+    v = min(max(v, 0.0), 1.0)
+    col = min(int(u * width), width - 1)
+    row = min(int(v * height), height - 1)
+    return pixels[row * width + col]
+
+
+def _orthonormal_basis(axis: tuple[float, float, float]):
+    """Return two unit vectors perpendicular to axis."""
+    ax, ay, az = axis
+    if abs(ax) < 0.9:
+        other = (1.0, 0.0, 0.0)
+    else:
+        other = (0.0, 1.0, 0.0)
+    bx = ay * other[2] - az * other[1]
+    by = az * other[0] - ax * other[2]
+    bz = ax * other[1] - ay * other[0]
+    bnorm = math.sqrt(bx * bx + by * by + bz * bz) or 1.0
+    b = (bx / bnorm, by / bnorm, bz / bnorm)
+    cx = ay * b[2] - az * b[1]
+    cy = az * b[0] - ax * b[2]
+    cz = ax * b[1] - ay * b[0]
+    return b, (cx, cy, cz)
+
+
+def _terminator_ring(
+    earth_radius_m: float,
+    sun: tuple[float, float, float],
+    n_points: int = 96,
+) -> tuple[list[float], list[float], list[float]]:
+    """Day/night boundary circle on the Earth surface (plane normal to the Sun)."""
+    b, c = _orthonormal_basis(sun)
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    for k in range(n_points + 1):
+        ang = 2.0 * math.pi * k / n_points
+        ca = math.cos(ang)
+        sa = math.sin(ang)
+        xs.append(earth_radius_m * (ca * b[0] + sa * c[0]))
+        ys.append(earth_radius_m * (ca * b[1] + sa * c[1]))
+        zs.append(earth_radius_m * (ca * b[2] + sa * c[2]))
+    return xs, ys, zs
+
+
+def _sphere_triangle_indices(n_lat: int, n_lon: int):
+    """Triangle indices for a lat/lon grid with (n_lat+1)*(n_lon+1) vertices."""
+    i_idx: list[int] = []
+    j_idx: list[int] = []
+    k_idx: list[int] = []
+    row = n_lon + 1
+    for i in range(n_lat):
+        for j in range(n_lon):
+            a = i * row + j
+            b = a + 1
+            c = a + row
+            d = c + 1
+            i_idx.extend((a, a))
+            j_idx.extend((b, d))
+            k_idx.extend((d, c))
+    return i_idx, j_idx, k_idx
+
+
+@lru_cache(maxsize=4)
+def _earth_textured_mesh(
+    radius_m: float,
+    sun_x: float,
+    sun_y: float,
+    sun_z: float,
+    n_lat: int = 128,
+    n_lon: int = 256,
+    mtime_ns: int = 0,
+):
+    """Textured Earth sphere. Day/night comes from Plotly lighting + mild bake."""
+    del mtime_ns  # cache key only
+    sun = (sun_x, sun_y, sun_z)
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    colors: list[str] = []
     for i in range(n_lat + 1):
         lat = math.pi * (-0.5 + i / n_lat)
-        row_x: list[float] = []
-        row_y: list[float] = []
-        row_z: list[float] = []
+        cos_lat = math.cos(lat)
+        sin_lat = math.sin(lat)
         for j in range(n_lon + 1):
             lon = 2.0 * math.pi * j / n_lon
-            row_x.append(radius_m * math.cos(lat) * math.cos(lon))
-            row_y.append(radius_m * math.cos(lat) * math.sin(lon))
-            row_z.append(radius_m * math.sin(lat))
-        xs.append(row_x)
-        ys.append(row_y)
-        zs.append(row_z)
-    return xs, ys, zs
+            nx = cos_lat * math.cos(lon)
+            ny = cos_lat * math.sin(lon)
+            nz = sin_lat
+            xs.append(radius_m * nx)
+            ys.append(radius_m * ny)
+            zs.append(radius_m * nz)
+            # Mild bake so night side stays visible under lighting.
+            illumination = nx * sun[0] + ny * sun[1] + nz * sun[2]
+            shade = 0.22 + 0.78 * max(0.0, min(1.0, 0.55 + illumination / 0.45))
+            r, g, b = _sample_earth_rgb(lon, lat)
+            colors.append(
+                f"rgb({int(r * shade)},{int(g * shade)},{int(b * shade)})"
+            )
+
+    i_idx, j_idx, k_idx = _sphere_triangle_indices(n_lat, n_lon)
+    return xs, ys, zs, i_idx, j_idx, k_idx, colors
+
+
+@lru_cache(maxsize=2)
+def _atmosphere_mesh(radius_m: float, n_lat: int = 48, n_lon: int = 96):
+    """Thin translucent shell for a soft atmospheric limb."""
+    shell_r = radius_m * 1.018
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    colors: list[str] = []
+    for i in range(n_lat + 1):
+        lat = math.pi * (-0.5 + i / n_lat)
+        cos_lat = math.cos(lat)
+        sin_lat = math.sin(lat)
+        for j in range(n_lon + 1):
+            lon = 2.0 * math.pi * j / n_lon
+            xs.append(shell_r * cos_lat * math.cos(lon))
+            ys.append(shell_r * cos_lat * math.sin(lon))
+            zs.append(shell_r * sin_lat)
+            colors.append("rgb(120,170,255)")
+    i_idx, j_idx, k_idx = _sphere_triangle_indices(n_lat, n_lon)
+    return xs, ys, zs, i_idx, j_idx, k_idx, colors
 
 
 def _shadow_cylinder_mesh(
@@ -140,55 +270,113 @@ def _mesh_from_boxes(
     return xs, ys, zs, i_idx, j_idx, k_idx
 
 
+def _offset(
+    origin: tuple[float, float, float],
+    axis: tuple[float, float, float],
+    distance: float,
+) -> tuple[float, float, float]:
+    return (
+        origin[0] + distance * axis[0],
+        origin[1] + distance * axis[1],
+        origin[2] + distance * axis[2],
+    )
+
+
 def _spacecraft_meshes(
     position: tuple[float, float, float],
     orbital_angle_rad: float,
     visual_scale_m: float,
 ):
-    """Illustrative body + two solar panels. Orientation is fixed to the orbit frame.
+    """Illustrative smallsat: bus, solar wings, antenna, thrusters.
 
-    This is visual only. It does not simulate attitude dynamics.
+    Orientation is fixed to the orbit frame. Visual only — not attitude dynamics.
     """
-    # Local orbit-frame axes for an equatorial circular orbit.
+    s = visual_scale_m
     axis_r = (math.cos(orbital_angle_rad), math.sin(orbital_angle_rad), 0.0)
     axis_t = (-math.sin(orbital_angle_rad), math.cos(orbital_angle_rad), 0.0)
     axis_n = (0.0, 0.0, 1.0)
 
-    body = _box_corners(
+    # Main bus + slightly raised radiator / instrument deck.
+    bus = _box_corners(
         position, axis_r, axis_t, axis_n,
-        half_r=0.55 * visual_scale_m,
-        half_t=0.45 * visual_scale_m,
-        half_n=0.30 * visual_scale_m,
+        half_r=0.62 * s, half_t=0.48 * s, half_n=0.38 * s,
     )
-    panel_offset = 1.15 * visual_scale_m
-    panel_half_n = 1.35 * visual_scale_m
-    panel_half_t = 0.18 * visual_scale_m
-    panel_half_r = 0.08 * visual_scale_m
-    panel_plus_center = (
-        position[0] + panel_offset * axis_n[0],
-        position[1] + panel_offset * axis_n[1],
-        position[2] + panel_offset * axis_n[2],
+    deck = _box_corners(
+        _offset(position, axis_r, 0.08 * s),
+        axis_r, axis_t, axis_n,
+        half_r=0.50 * s, half_t=0.40 * s, half_n=0.42 * s,
     )
-    panel_minus_center = (
-        position[0] - panel_offset * axis_n[0],
-        position[1] - panel_offset * axis_n[1],
-        position[2] - panel_offset * axis_n[2],
+
+    # Solar wings on ± orbit-normal, with short yoke stubs.
+    yoke_half_n = 0.22 * s
+    panel_half_n = 1.55 * s
+    panel_half_t = 0.14 * s
+    panel_half_r = 0.055 * s
+    yoke_offset = 0.55 * s
+    panel_offset = 1.45 * s
+    panels = []
+    yokes = []
+    for sign in (1.0, -1.0):
+        yoke_center = _offset(position, axis_n, sign * yoke_offset)
+        panel_center = _offset(position, axis_n, sign * panel_offset)
+        yokes.append(
+            _box_corners(
+                yoke_center, axis_r, axis_t, axis_n,
+                half_r=0.10 * s, half_t=0.10 * s, half_n=yoke_half_n,
+            )
+        )
+        panels.append(
+            _box_corners(
+                panel_center, axis_r, axis_t, axis_n,
+                half_r=panel_half_r, half_t=panel_half_t, half_n=panel_half_n,
+            )
+        )
+        # Thin cell highlight strip on each wing.
+        panels.append(
+            _box_corners(
+                _offset(panel_center, axis_r, 0.02 * s),
+                axis_r, axis_t, axis_n,
+                half_r=0.02 * s, half_t=panel_half_t * 0.92, half_n=panel_half_n * 0.92,
+            )
+        )
+
+    # High-gain dish (stacked discs) on a short boom, anti-velocity side.
+    boom_root = _offset(position, axis_t, -0.55 * s)
+    boom = _box_corners(
+        boom_root, axis_r, axis_t, axis_n,
+        half_r=0.06 * s, half_t=0.28 * s, half_n=0.06 * s,
     )
-    panel_plus = _box_corners(
-        panel_plus_center, axis_r, axis_t, axis_n,
-        half_r=panel_half_r,
-        half_t=panel_half_t,
-        half_n=panel_half_n,
+    dish_center = _offset(position, axis_t, -0.95 * s)
+    dish_outer = _box_corners(
+        dish_center, axis_r, axis_t, axis_n,
+        half_r=0.42 * s, half_t=0.05 * s, half_n=0.42 * s,
     )
-    panel_minus = _box_corners(
-        panel_minus_center, axis_r, axis_t, axis_n,
-        half_r=panel_half_r,
-        half_t=panel_half_t,
-        half_n=panel_half_n,
+    dish_inner = _box_corners(
+        _offset(dish_center, axis_t, -0.04 * s),
+        axis_r, axis_t, axis_n,
+        half_r=0.28 * s, half_t=0.04 * s, half_n=0.28 * s,
     )
-    body_mesh = _mesh_from_boxes([body])
-    panel_mesh = _mesh_from_boxes([panel_plus, panel_minus])
-    return body_mesh, panel_mesh
+
+    # Aft thruster block + two nozzles.
+    aft = _offset(position, axis_t, 0.58 * s)
+    thruster_block = _box_corners(
+        aft, axis_r, axis_t, axis_n,
+        half_r=0.22 * s, half_t=0.12 * s, half_n=0.18 * s,
+    )
+    nozzles = []
+    for side in (-0.12 * s, 0.12 * s):
+        nozzles.append(
+            _box_corners(
+                _offset(_offset(aft, axis_n, side), axis_t, 0.16 * s),
+                axis_r, axis_t, axis_n,
+                half_r=0.07 * s, half_t=0.10 * s, half_n=0.07 * s,
+            )
+        )
+
+    bus_mesh = _mesh_from_boxes([bus, deck, thruster_block])
+    panel_mesh = _mesh_from_boxes(yokes + panels)
+    detail_mesh = _mesh_from_boxes([boom, dish_outer, dish_inner, *nozzles])
+    return bus_mesh, panel_mesh, detail_mesh
 
 
 def build_orbit_3d_figure(
@@ -227,33 +415,70 @@ def build_orbit_3d_figure(
     temp_c = kelvin_to_celsius(result.temperature_k[sample_index])
     status = "ECLIPSE" if eclipsed else "SUNLIT"
 
-    earth_x, earth_y, earth_z = _sphere_mesh(earth_r)
     shadow_x, shadow_y, shadow_z = _shadow_cylinder_mesh(
         earth_r, length_m=2.2 * radius
     )
+    map_mtime = (
+        _EARTH_MAP_PATH.stat().st_mtime_ns if _EARTH_MAP_PATH.is_file() else 0
+    )
+    earth_mesh = _earth_textured_mesh(
+        earth_r, sun[0], sun[1], sun[2], mtime_ns=map_mtime
+    )
+    atmosphere = _atmosphere_mesh(earth_r)
+    term_x, term_y, term_z = _terminator_ring(earth_r * 1.004, sun)
+    # Plotly Mesh3d lightposition is capped at ±1e5.
+    light_distance = 1.0e5
+    sun_light = {
+        "x": sun[0] * light_distance,
+        "y": sun[1] * light_distance,
+        "z": sun[2] * light_distance,
+    }
 
-    # Dayside / nightside coloring using sun-facing hemisphere.
-    earth_surfacecolor = []
-    for row_x, row_y, row_z in zip(earth_x, earth_y, earth_z):
-        color_row = []
-        for x, y, z in zip(row_x, row_y, row_z):
-            dot = (x * sun[0] + y * sun[1] + z * sun[2]) / earth_r
-            color_row.append(max(dot, 0.0))
-        earth_surfacecolor.append(color_row)
-
-    sun_scale = 1.35 * radius
     figure = go.Figure()
     figure.add_trace(
-        go.Surface(
-            x=earth_x,
-            y=earth_y,
-            z=earth_z,
-            surfacecolor=earth_surfacecolor,
-            colorscale=[[0.0, "#0B1426"], [1.0, "#A8C5E8"]],
-            showscale=False,
-            opacity=1.0,
+        go.Mesh3d(
+            x=earth_mesh[0],
+            y=earth_mesh[1],
+            z=earth_mesh[2],
+            i=earth_mesh[3],
+            j=earth_mesh[4],
+            k=earth_mesh[5],
+            vertexcolor=earth_mesh[6],
+            flatshading=False,
+            lighting={
+                "ambient": 0.35,
+                "diffuse": 0.95,
+                "fresnel": 0.15,
+                "specular": 0.45,
+                "roughness": 0.55,
+            },
+            lightposition=sun_light,
             name="Earth",
             hoverinfo="skip",
+            showscale=False,
+        )
+    )
+    figure.add_trace(
+        go.Mesh3d(
+            x=atmosphere[0],
+            y=atmosphere[1],
+            z=atmosphere[2],
+            i=atmosphere[3],
+            j=atmosphere[4],
+            k=atmosphere[5],
+            vertexcolor=atmosphere[6],
+            opacity=0.12,
+            flatshading=False,
+            lighting={
+                "ambient": 0.8,
+                "diffuse": 0.4,
+                "specular": 0.0,
+                "roughness": 1.0,
+            },
+            lightposition=sun_light,
+            name="Atmosphere",
+            hoverinfo="skip",
+            showscale=False,
         )
     )
     figure.add_trace(
@@ -271,6 +496,17 @@ def build_orbit_3d_figure(
     )
     figure.add_trace(
         go.Scatter3d(
+            x=term_x,
+            y=term_y,
+            z=term_z,
+            mode="lines",
+            line={"color": "#FFE08A", "width": 3},
+            name="Day / night terminator",
+            hoverinfo="skip",
+        )
+    )
+    figure.add_trace(
+        go.Scatter3d(
             x=path_x,
             y=path_y,
             z=path_z,
@@ -281,27 +517,30 @@ def build_orbit_3d_figure(
         )
     )
     # Visual scale is exaggerated so the craft is readable next to Earth.
-    visual_scale = 0.060 * earth_r
-    body_mesh, panel_mesh = _spacecraft_meshes(sat, angle, visual_scale)
-    body_color = "#8E8E93" if eclipsed else "#F5F5F7"
+    visual_scale = 0.078 * earth_r
+    bus_mesh, panel_mesh, detail_mesh = _spacecraft_meshes(sat, angle, visual_scale)
+    bus_color = "#6E6E73" if eclipsed else "#E8E8ED"
+    panel_color = "#1C3D6E" if eclipsed else "#0A4D8C"
+    detail_color = "#8E8E93" if eclipsed else "#D4D4D8"
+    craft_hover = (
+        f"t = {time_s/60.0:.2f} min<br>"
+        f"T = {temp_c:.2f} °C<br>"
+        f"{status}<extra></extra>"
+    )
     figure.add_trace(
         go.Mesh3d(
-            x=body_mesh[0],
-            y=body_mesh[1],
-            z=body_mesh[2],
-            i=body_mesh[3],
-            j=body_mesh[4],
-            k=body_mesh[5],
-            color=body_color,
+            x=bus_mesh[0],
+            y=bus_mesh[1],
+            z=bus_mesh[2],
+            i=bus_mesh[3],
+            j=bus_mesh[4],
+            k=bus_mesh[5],
+            color=bus_color,
             opacity=1.0,
-            name="Spacecraft",
-            hovertemplate=(
-                f"t = {time_s/60.0:.2f} min<br>"
-                f"T = {temp_c:.2f} °C<br>"
-                f"{status}<extra></extra>"
-            ),
+            name="Spacecraft bus",
+            hovertemplate=craft_hover,
             flatshading=True,
-            lighting={"ambient": 0.55, "diffuse": 0.7, "specular": 0.2},
+            lighting={"ambient": 0.45, "diffuse": 0.85, "specular": 0.35, "roughness": 0.4},
         )
     )
     figure.add_trace(
@@ -312,26 +551,30 @@ def build_orbit_3d_figure(
             i=panel_mesh[3],
             j=panel_mesh[4],
             k=panel_mesh[5],
-            color="#0A84FF",
+            color=panel_color,
             opacity=1.0,
-            name="Solar panels",
+            name="Solar arrays",
             hoverinfo="skip",
             flatshading=True,
-            lighting={"ambient": 0.5, "diffuse": 0.65, "specular": 0.15},
+            lighting={"ambient": 0.35, "diffuse": 0.75, "specular": 0.55, "roughness": 0.25},
         )
     )
     figure.add_trace(
-        go.Scatter3d(
-            x=[0.0, sun_scale * sun[0]],
-            y=[0.0, sun_scale * sun[1]],
-            z=[0.0, sun_scale * sun[2]],
-            mode="lines",
-            line={"color": "#FFD60A", "width": 5},
-            name="Sunlight",
+        go.Mesh3d(
+            x=detail_mesh[0],
+            y=detail_mesh[1],
+            z=detail_mesh[2],
+            i=detail_mesh[3],
+            j=detail_mesh[4],
+            k=detail_mesh[5],
+            color=detail_color,
+            opacity=1.0,
+            name="Antenna / thrusters",
             hoverinfo="skip",
+            flatshading=True,
+            lighting={"ambient": 0.4, "diffuse": 0.8, "specular": 0.45, "roughness": 0.35},
         )
     )
-
     axis_style = {
         "showbackground": False,
         "showgrid": False,
