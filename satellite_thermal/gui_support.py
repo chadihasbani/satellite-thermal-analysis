@@ -225,9 +225,9 @@ class CompletedGuiStudy:
 
 
 # Stable display names for environmental-heating cases (Mode 3).
-ENV_CASE_A = "A — No Earth Heating"
-ENV_CASE_B = "B — With Earth Infrared"
-ENV_CASE_C = "C — With Earth Infrared and Albedo"
+ENV_CASE_A = "A - No Earth Heating"
+ENV_CASE_B = "B - With Earth Infrared"
+ENV_CASE_C = "C - With Earth Infrared and Albedo"
 ENV_CASE_NAMES = (ENV_CASE_A, ENV_CASE_B, ENV_CASE_C)
 
 REF_CASE_NAME = "Reference"

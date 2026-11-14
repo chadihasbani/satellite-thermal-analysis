@@ -9,7 +9,6 @@ from __future__ import annotations
 import streamlit as st
 
 from satellite_thermal.gui_support import (
-    ENV_CASE_C,
     GuiRunRequest,
     all_curves,
     changed_parameter_rows,
@@ -820,9 +819,9 @@ These are three heating configurations of the **same** simplified spacecraft
 
 | Case | Includes | Excludes |
 | --- | --- | --- |
-| **A — No Earth Heating** | Direct solar, internal heat, radiative cooling | Earth IR, albedo |
-| **B — With Earth Infrared** | Everything in A + Earth infrared | Albedo |
-| **C — With Earth Infrared and Albedo** | Everything in B + Earth albedo | — |
+| **A - No Earth Heating** | Direct solar, internal heat, radiative cooling | Earth IR, albedo |
+| **B - With Earth Infrared** | Everything in A + Earth infrared | Albedo |
+| **C - With Earth Infrared and Albedo** | Everything in B + Earth albedo | — |
             """
         )
         st.caption(f"Currently inspecting **{viz_curve.name}**.")
