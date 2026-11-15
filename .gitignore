@@ -13,5 +13,7 @@ outputs/*
 *.png
 !docs/images/*.png
 !assets/*.jpg
+*.pdf
+!docs/examples/*.pdf
 .DS_Store
 Thumbs.db

@@ -330,12 +330,12 @@ def scenario_controlled_field_names() -> tuple[str, ...]:
 
 
 def scenario_select_options() -> list[tuple[str, str]]:
-    """(id, label) pairs for the GUI selector."""
+    """(id, label) pairs for the GUI selector (plain-language names)."""
     return [
-        (ThermalScenarioId.NOMINAL.value, "Nominal (V1 educational environment)"),
-        (ThermalScenarioId.HOT.value, "Hot screening (GD-AP-2301 winter pair)"),
-        (ThermalScenarioId.COLD.value, "Cold screening (GD-AP-2301 summer pair)"),
-        (ThermalScenarioId.CUSTOM.value, "Custom (sidebar values as entered)"),
+        (ThermalScenarioId.CUSTOM.value, "Custom"),
+        (ThermalScenarioId.NOMINAL.value, "Normal conditions"),
+        (ThermalScenarioId.HOT.value, "Hot conditions"),
+        (ThermalScenarioId.COLD.value, "Cold conditions"),
     ]
 
 

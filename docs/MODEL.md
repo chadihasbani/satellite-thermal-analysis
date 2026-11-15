@@ -858,5 +858,5 @@ checks consistency:
 - GUI: “Compare to Reference Defaults” clarifies that the modified case may
   change orbit and operations as well as spacecraft properties.
 
-See `docs/SOURCE_TRACEABILITY.md` (Checkpoint 6) for the source-audit table and
+See `docs/SOURCE_TRACEABILITY.md` and `docs/VERIFICATION.md` for the source-audit table and
 claim boundaries.

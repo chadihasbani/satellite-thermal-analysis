@@ -238,8 +238,9 @@ class ShadowVisualizationTests(unittest.TestCase):
                 self.assertTrue(math.isclose(component, expected, abs_tol=1e-9))
             figure = build_orbit_3d_figure(result, orbit, 0)
             names = [trace.name for trace in figure.data]
-            self.assertIn("Sun direction", names)
+            self.assertNotIn("Sun direction", names)
             self.assertIn("Eclipse shadow", names)
+            self.assertEqual(figure.layout.scene.dragmode, "turntable")
 
 
 if __name__ == "__main__":

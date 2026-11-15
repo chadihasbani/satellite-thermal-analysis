@@ -623,6 +623,18 @@ def environment_comparison_summary_rows(
     ]
 
 
+def _delta_phrase(delta_c: float, subject: str) -> str:
+    """Natural-language phrase for a signed temperature change in °C."""
+    if abs(delta_c) < 0.005:
+        return f"{subject} leaves the final temperature essentially unchanged"
+    warmer = delta_c > 0.0
+    verb = "warmer" if warmer else "cooler"
+    return (
+        f"{subject} makes the spacecraft approximately "
+        f"{abs(delta_c):.2f} °C {verb} in this simulation"
+    )
+
+
 def environment_comparison_interpretation(curves: tuple[NamedResult, ...]) -> str:
     """Short auto-generated interpretation of A/B/C final-temperature differences."""
     if len(curves) != 3:
@@ -631,12 +643,27 @@ def environment_comparison_interpretation(curves: tuple[NamedResult, ...]) -> st
     d_ba = finals[1] - finals[0]
     d_cb = finals[2] - finals[1]
     d_ca = finals[2] - finals[0]
+    earth_ir = _delta_phrase(d_ba, "Heat radiated by Earth")
+    if abs(d_cb) < 0.005:
+        albedo = (
+            "Adding sunlight reflected by Earth leaves the final temperature "
+            "essentially unchanged"
+        )
+    elif d_cb > 0.0:
+        albedo = (
+            "Adding sunlight reflected by Earth increases the final temperature "
+            f"by another {d_cb:.2f} °C"
+        )
+    else:
+        albedo = (
+            "Adding sunlight reflected by Earth decreases the final temperature "
+            f"by another {abs(d_cb):.2f} °C"
+        )
     return (
-        "Under the selected assumptions, including Earth infrared radiation "
-        f"changes the final spacecraft temperature by {d_ba:+.2f} K. "
-        f"Adding albedo produces a further change of {d_cb:+.2f} K "
-        f"(C − A = {d_ca:+.2f} K). These are model results, not measured "
-        "satellite temperatures."
+        f"{earth_ir}. {albedo} "
+        f"(overall change from no Earth heating to both Earth loads: "
+        f"{d_ca:+.2f} °C). These are model results, not measured satellite "
+        "temperatures."
     )
 
 
@@ -798,13 +825,33 @@ def scenario_comparison_interpretation(curves: tuple[NamedResult, ...]) -> str:
     cold = temperature_metrics_c(by_name[SCENARIO_CASE_COLD].result)["final_c"]
     nominal = temperature_metrics_c(by_name[SCENARIO_CASE_NOMINAL].result)["final_c"]
     hot = temperature_metrics_c(by_name[SCENARIO_CASE_HOT].result)["final_c"]
+    d_cold = cold - nominal
+    d_hot = hot - nominal
+    cold_phrase = (
+        f"about {abs(d_cold):.2f} °C cooler than Normal"
+        if d_cold < 0.0
+        else (
+            f"about {abs(d_cold):.2f} °C warmer than Normal"
+            if d_cold > 0.0
+            else "essentially the same as Normal"
+        )
+    )
+    hot_phrase = (
+        f"about {abs(d_hot):.2f} °C warmer than Normal"
+        if d_hot > 0.0
+        else (
+            f"about {abs(d_hot):.2f} °C cooler than Normal"
+            if d_hot < 0.0
+            else "essentially the same as Normal"
+        )
+    )
     return (
-        "Under the selected spacecraft settings, the Cold screening final "
-        f"temperature is {cold - nominal:+.2f} K relative to Nominal, and the "
-        f"Hot screening final temperature is {hot - nominal:+.2f} K relative to "
-        "Nominal. Differences combine environmental fluxes, eclipse exposure "
-        "(beta), and illustrative internal power — not a universal worst case. "
-        "These are model results, not measured satellite temperatures."
+        "With this spacecraft setup, the Cold screening case finishes "
+        f"{cold_phrase}, while the Hot screening case finishes {hot_phrase}. "
+        "Those differences combine sunlight strength, Earth reflection, "
+        "eclipse exposure (β), and illustrative internal heating — not a "
+        "universal worst-case spacecraft design. These are model results, "
+        "not measured satellite temperatures."
     )
 
 

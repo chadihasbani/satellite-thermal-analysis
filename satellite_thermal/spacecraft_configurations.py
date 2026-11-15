@@ -416,29 +416,40 @@ def configuration_controlled_field_names() -> tuple[str, ...]:
 
 
 def configuration_select_options() -> list[tuple[str, str]]:
-    """(id, label) pairs for the GUI selector."""
+    """(id, label) pairs for the GUI selector (plain-language primary names)."""
     return [
         (
             SpacecraftConfigurationId.LEGACY_SIMPLIFIED.value,
-            "Legacy simplified (V1 fixed areas)",
-        ),
-        (
-            SpacecraftConfigurationId.ILLUSTRATIVE_CUBE.value,
-            "Illustrative 0.1 m cube (enhanced)",
+            "Reference Satellite",
         ),
         (
             SpacecraftConfigurationId.CUBESAT_1U.value,
-            "Generic 1U CubeSat-inspired (CDS Rev 14.1 envelope)",
+            "1U CubeSat",
         ),
         (
             SpacecraftConfigurationId.CUBESAT_3U.value,
-            "Generic 3U CubeSat-inspired (CDS Rev 14.1 envelope)",
+            "3U CubeSat",
         ),
         (
             SpacecraftConfigurationId.CUSTOM.value,
-            "Custom rectangular spacecraft",
+            "Custom Spacecraft",
+        ),
+        (
+            SpacecraftConfigurationId.ILLUSTRATIVE_CUBE.value,
+            "Enhanced 0.1 m cube",
         ),
     ]
+
+
+def primary_configuration_select_options() -> list[tuple[str, str]]:
+    """Default sidebar choices (legacy reference + CubeSats + custom)."""
+    primary_ids = {
+        SpacecraftConfigurationId.LEGACY_SIMPLIFIED.value,
+        SpacecraftConfigurationId.CUBESAT_1U.value,
+        SpacecraftConfigurationId.CUBESAT_3U.value,
+        SpacecraftConfigurationId.CUSTOM.value,
+    }
+    return [item for item in configuration_select_options() if item[0] in primary_ids]
 
 
 def sync_session_values_from_configuration(

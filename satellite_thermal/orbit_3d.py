@@ -29,6 +29,22 @@ from satellite_thermal.units import kelvin_to_celsius
 
 _EARTH_MAP_PATH = Path(__file__).resolve().parents[1] / "assets" / "earth_map.jpg"
 
+# Visual-only axial tilt so Earth does not sit “upright” relative to the
+# orbital XY plane. Does not change the thermal solver geometry.
+EARTH_AXIAL_TILT_RAD = math.radians(23.44)
+
+
+def _rotate_about_y(
+    x: float,
+    y: float,
+    z: float,
+    angle_rad: float,
+) -> tuple[float, float, float]:
+    """Rotate a point about +Y (used to tip Earth's geographic poles)."""
+    cos_a = math.cos(angle_rad)
+    sin_a = math.sin(angle_rad)
+    return (x * cos_a + z * sin_a, y, -x * sin_a + z * cos_a)
+
 
 @lru_cache(maxsize=2)
 def _earth_texture_pixels(
@@ -123,8 +139,14 @@ def _earth_textured_mesh(
     n_lat: int = 128,
     n_lon: int = 256,
     mtime_ns: int = 0,
+    axial_tilt_rad: float = EARTH_AXIAL_TILT_RAD,
 ):
-    """Textured Earth sphere. Day/night comes from Plotly lighting + mild bake."""
+    """Textured Earth sphere with a fixed visual axial tip.
+
+    Geographic lon/lat still drive the map sample. Vertices are then tipped by
+    ``axial_tilt_rad`` so the poles are not straight “up” relative to the
+    orbital XY plane. Day/night shading uses the tipped surface normal.
+    """
     del mtime_ns  # cache key only
     sun = (sun_x, sun_y, sun_z)
     xs: list[float] = []
@@ -137,9 +159,11 @@ def _earth_textured_mesh(
         sin_lat = math.sin(lat)
         for j in range(n_lon + 1):
             lon = 2.0 * math.pi * j / n_lon
-            nx = cos_lat * math.cos(lon)
-            ny = cos_lat * math.sin(lon)
-            nz = sin_lat
+            # Geographic unit normal (untilted Earth-fixed frame).
+            gx = cos_lat * math.cos(lon)
+            gy = cos_lat * math.sin(lon)
+            gz = sin_lat
+            nx, ny, nz = _rotate_about_y(gx, gy, gz, axial_tilt_rad)
             xs.append(radius_m * nx)
             ys.append(radius_m * ny)
             zs.append(radius_m * nz)
@@ -156,8 +180,13 @@ def _earth_textured_mesh(
 
 
 @lru_cache(maxsize=2)
-def _atmosphere_mesh(radius_m: float, n_lat: int = 48, n_lon: int = 96):
-    """Thin translucent shell for a soft atmospheric limb."""
+def _atmosphere_mesh(
+    radius_m: float,
+    n_lat: int = 48,
+    n_lon: int = 96,
+    axial_tilt_rad: float = EARTH_AXIAL_TILT_RAD,
+):
+    """Thin translucent shell for a soft atmospheric limb (same tip as Earth)."""
     shell_r = radius_m * 1.018
     xs: list[float] = []
     ys: list[float] = []
@@ -169,9 +198,13 @@ def _atmosphere_mesh(radius_m: float, n_lat: int = 48, n_lon: int = 96):
         sin_lat = math.sin(lat)
         for j in range(n_lon + 1):
             lon = 2.0 * math.pi * j / n_lon
-            xs.append(shell_r * cos_lat * math.cos(lon))
-            ys.append(shell_r * cos_lat * math.sin(lon))
-            zs.append(shell_r * sin_lat)
+            gx = cos_lat * math.cos(lon)
+            gy = cos_lat * math.sin(lon)
+            gz = sin_lat
+            nx, ny, nz = _rotate_about_y(gx, gy, gz, axial_tilt_rad)
+            xs.append(shell_r * nx)
+            ys.append(shell_r * ny)
+            zs.append(shell_r * nz)
             colors.append("rgb(120,170,255)")
     i_idx, j_idx, k_idx = _sphere_triangle_indices(n_lat, n_lon)
     return xs, ys, zs, i_idx, j_idx, k_idx, colors
@@ -495,10 +528,6 @@ def build_orbit_3d_figure(
     shadow_x, shadow_y, shadow_z = _shadow_cylinder_mesh(
         earth_r, length_m=2.2 * radius, sun_direction_vector=sun
     )
-    sun_arrow_scale = 1.55 * radius
-    sun_line_x = [0.0, sun[0] * sun_arrow_scale]
-    sun_line_y = [0.0, sun[1] * sun_arrow_scale]
-    sun_line_z = [0.0, sun[2] * sun_arrow_scale]
     map_mtime = (
         _EARTH_MAP_PATH.stat().st_mtime_ns if _EARTH_MAP_PATH.is_file() else 0
     )
@@ -597,21 +626,6 @@ def build_orbit_3d_figure(
             hoverinfo="skip",
         )
     )
-    figure.add_trace(
-        go.Scatter3d(
-            x=sun_line_x,
-            y=sun_line_y,
-            z=sun_line_z,
-            mode="lines+markers",
-            line={"color": "#FFD60A", "width": 5},
-            marker={"size": [0, 5], "color": "#FFD60A"},
-            name="Sun direction",
-            hovertemplate=(
-                f"β = {math.degrees(settings.beta_rad):.1f}°"
-                "<extra>Sun direction</extra>"
-            ),
-        )
-    )
     # Visual scale is exaggerated so the craft is readable next to Earth.
     visual_scale = 0.078 * earth_r
     if model == THERMAL_MODEL_ENHANCED:
@@ -703,15 +717,19 @@ def build_orbit_3d_figure(
         paper_bgcolor="#000000",
         plot_bgcolor="#000000",
         font={"color": "#F5F5F7", "family": "Helvetica, Arial, sans-serif"},
+        # Keep the user's camera angle when the time sample changes.
+        uirevision="orbit-3d-fixed-earth",
         scene={
             "xaxis": axis_style,
             "yaxis": axis_style,
             "zaxis": axis_style,
             "aspectmode": "data",
             "bgcolor": "#000000",
-            # Closer camera so Earth + orbit fill the frame on load (no empty letterboxing).
+            # Turntable: spin horizontally around a fixed up-axis (no Earth flips).
+            "dragmode": "turntable",
             "camera": {
-                "eye": {"x": 1.05, "y": 0.95, "z": 0.55},
+                "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+                "eye": {"x": 1.25, "y": 1.05, "z": 0.55},
                 "center": {"x": 0.0, "y": 0.0, "z": 0.0},
             },
         },
@@ -733,8 +751,8 @@ def build_orbit_3d_figure(
     )
     figure.add_annotation(
         text=(
-            "Illustrative geometry · craft enlarged · not to scale · "
-            f"wings visual-only · {attitude_note}"
+            "Earth tipped ~23° (visual) · craft enlarged · not to scale · "
+            f"drag to spin · {attitude_note}"
         ),
         xref="paper",
         yref="paper",

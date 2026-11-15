@@ -114,8 +114,9 @@ class EnvironmentInspectDefaultsTests(unittest.TestCase):
         self.assertIn(f"{finals[1] - finals[0]:+.2f} K", rows[1]["Temperature change"])
         self.assertIn(f"{finals[2] - finals[1]:+.2f} K", rows[2]["Temperature change"])
         text = environment_comparison_interpretation(curves)
-        self.assertIn(f"{finals[1] - finals[0]:+.2f} K", text)
-        self.assertIn(f"{finals[2] - finals[1]:+.2f} K", text)
+        self.assertIn(f"{abs(finals[1] - finals[0]):.2f} °C", text)
+        self.assertIn(f"{abs(finals[2] - finals[1]):.2f} °C", text)
+        self.assertIn(f"{finals[2] - finals[0]:+.2f} °C", text)
 
 
 class Orbit3dSyncTests(unittest.TestCase):
