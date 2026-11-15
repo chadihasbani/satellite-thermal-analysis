@@ -61,6 +61,7 @@ from satellite_thermal.report_pdf import (
     ReportMeta,
     SIMULATOR_VERSION,
     build_engineering_report_pdf,
+    ensure_kaleido_browser_configured,
 )
 
 st.set_page_config(
@@ -1419,17 +1420,28 @@ with st.expander("Export", expanded=False):
     if prepare_pdf and not inputs_changed:
         try:
             with st.spinner("Building engineering PDF…"):
-                st.session_state.pdf_report_bytes = build_engineering_report_pdf(
+                ensure_kaleido_browser_configured()
+                report = build_engineering_report_pdf(
                     study,
                     viz_curve=viz_curve,
                     sample_index=viz_index,
                     meta=report_meta,
                 )
+            st.session_state.pdf_report_bytes = report.pdf_bytes
             st.session_state.pdf_report_key = pdf_cache_key
+            st.session_state.pdf_orbital_included = report.orbital_snapshot_included
             st.success("PDF ready — use the download button below.")
+            if not report.orbital_snapshot_included:
+                st.warning(
+                    "The engineering report was generated without the optional "
+                    "3D orbital image because the image renderer was unavailable. "
+                    "Temperature history, heat-flow results, and all other sections "
+                    "are still included."
+                )
         except Exception as exc:  # noqa: BLE001
             st.session_state.pdf_report_bytes = None
             st.session_state.pdf_report_key = None
+            st.session_state.pdf_orbital_included = None
             st.error(f"PDF report could not be generated: {exc}")
 
     pdf_ready = (

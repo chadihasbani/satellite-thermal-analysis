@@ -59,11 +59,13 @@ Sample PDFs written during local checks land under `outputs/` (gitignored).
 ## Dependencies and hosting notes
 
 - `requirements.txt` lists `reportlab`, `kaleido`, and `pypdf` (tests).
+- Root `packages.txt` installs Debian `chromium` on Streamlit Community Cloud
+  so Kaleido can render the optional 3D orbital snapshot without per-user
+  Chrome downloads.
+- The PDF builder sets `BROWSER_PATH` once when a system Chromium/Chrome
+  executable is found (typical Cloud path: `/usr/bin/chromium`).
 - GitHub Actions installs requirements and downloads Chrome via
   `asyncio.run(kaleido.get_chrome())` (hard failure if that step fails).
-- Local PDF orbital snapshots work when Kaleido can export Plotly figures
-  (`figure.to_image`).
-- Streamlit Community Cloud may still lack a usable browser binary for Kaleido
-  even when packages install cleanly. Treat missing Chrome / failed orbital
-  PNG export on Community Cloud as a **remaining deployment risk** until
-  verified on the live host after V2 publish.
+- If orbital-image export still fails, the PDF is still generated with a
+  disclosed note that the 3D snapshot could not be included; temperature,
+  heat-flow, configuration, and reference sections remain intact.

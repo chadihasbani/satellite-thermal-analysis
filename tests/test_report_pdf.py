@@ -18,11 +18,17 @@ from satellite_thermal.gui_support import (
     run_scenario_comparison_mode,
     run_single_mode,
 )
+from unittest.mock import patch
+
+from satellite_thermal import report_pdf as report_pdf_mod
 from satellite_thermal.report_pdf import (
+    ORBITAL_IMAGE_UNAVAILABLE_NOTE,
     ReportMeta,
     SIMULATOR_VERSION,
     build_engineering_report_pdf,
     default_report_meta,
+    ensure_kaleido_browser_configured,
+    export_orbital_snapshot_png,
     overall_baseline_delta_c,
     power_schedule_detail_rows,
 )
@@ -48,11 +54,15 @@ def _pdf_text(pdf_bytes: bytes) -> str:
     return "\n".join((page.extract_text() or "") for page in reader.pages)
 
 
+def _build_pdf_bytes(*args, **kwargs) -> bytes:
+    return build_engineering_report_pdf(*args, **kwargs).pdf_bytes
+
+
 class ReportPdfTests(unittest.TestCase):
     def test_single_mode_pdf_has_header_and_version(self) -> None:
         study = run_single_mode(_short_request())
         curve = study.primary
-        pdf = build_engineering_report_pdf(
+        report = build_engineering_report_pdf(
             study,
             viz_curve=curve,
             sample_index=0,
@@ -60,6 +70,7 @@ class ReportPdfTests(unittest.TestCase):
                 SpacecraftConfigurationId.LEGACY_SIMPLIFIED.value
             ),
         )
+        pdf = report.pdf_bytes
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertGreater(len(pdf), 8_000)
         text = _pdf_text(pdf)
@@ -71,7 +82,7 @@ class ReportPdfTests(unittest.TestCase):
         curves = all_curves(study)
         name = default_inspect_curve_name(study)
         curve = resolve_inspect_curve(curves, name, name)
-        pdf = build_engineering_report_pdf(
+        pdf = _build_pdf_bytes(
             study,
             viz_curve=curve,
             sample_index=min(5, len(curve.result.time_s) - 1),
@@ -99,7 +110,7 @@ class ReportPdfTests(unittest.TestCase):
             scenario_id="custom",
             scenario_label="Custom",
         )
-        pdf = build_engineering_report_pdf(
+        pdf = _build_pdf_bytes(
             study,
             viz_curve=curve,
             sample_index=0,
@@ -118,7 +129,7 @@ class ReportPdfTests(unittest.TestCase):
         study = run_baseline_comparison_mode(request)
         curves = all_curves(study)
         curve = curves[-1]
-        pdf = build_engineering_report_pdf(
+        pdf = _build_pdf_bytes(
             study,
             viz_curve=curve,
             sample_index=0,
@@ -133,7 +144,7 @@ class ReportPdfTests(unittest.TestCase):
             SpacecraftConfigurationId.CUBESAT_3U,
         )
         study = run_single_mode(request)
-        pdf = build_engineering_report_pdf(
+        pdf = _build_pdf_bytes(
             study,
             viz_curve=study.primary,
             sample_index=0,
@@ -163,7 +174,7 @@ class ReportPdfTests(unittest.TestCase):
         self.assertAlmostEqual(overall_baseline_delta_c(study), expected, places=6)
         # Inspection case must not change the overall delta helper.
         for curve in curves:
-            pdf = build_engineering_report_pdf(
+            pdf = _build_pdf_bytes(
                 study,
                 viz_curve=curve,
                 sample_index=0,
@@ -189,7 +200,7 @@ class ReportPdfTests(unittest.TestCase):
         curves = all_curves(study)
         name = default_inspect_curve_name(study)
         curve = resolve_inspect_curve(curves, name, name)
-        pdf = build_engineering_report_pdf(
+        pdf = _build_pdf_bytes(
             study,
             viz_curve=curve,
             sample_index=0,
@@ -204,6 +215,120 @@ class ReportPdfTests(unittest.TestCase):
             "Single Simulation mode reports one case only",
             text,
         )
+
+
+class ReportPdfOrbitalExportTests(unittest.TestCase):
+    """Orbital Plotly/Kaleido export success and graceful fallback."""
+
+    def test_orbital_export_helper_success_when_renderer_works(self) -> None:
+        study = run_single_mode(_short_request())
+        from satellite_thermal.orbit_3d import build_orbit_3d_figure
+
+        req = study.primary.request
+        fig = build_orbit_3d_figure(
+            result=study.primary.result,
+            orbit=study.primary.orbit,
+            sample_index=0,
+            title=study.primary.name,
+            attitude_mode=req.attitude_mode,
+            body_length_m=req.body_length_m,
+            body_width_m=req.body_width_m,
+            body_height_m=req.body_height_m,
+            thermal_model=req.thermal_model,
+        )
+        png, err = export_orbital_snapshot_png(fig, width=400, height=300)
+        if png is None:
+            self.skipTest(f"Orbital export unavailable in this environment: {err}")
+        self.assertIsNone(err)
+        self.assertTrue(png.startswith(b"\x89PNG"))
+
+    def test_pdf_includes_orbital_image_when_export_succeeds(self) -> None:
+        study = run_single_mode(_short_request())
+        from io import BytesIO
+
+        from PIL import Image
+
+        buf = BytesIO()
+        Image.new("RGB", (32, 24), color=(40, 90, 160)).save(buf, format="PNG")
+        fake_png = buf.getvalue()
+        with patch(
+            "satellite_thermal.report_pdf.export_orbital_snapshot_png",
+            return_value=(fake_png, None),
+        ):
+            report = build_engineering_report_pdf(
+                study,
+                viz_curve=study.primary,
+                sample_index=0,
+                meta=default_report_meta(),
+            )
+        self.assertTrue(report.orbital_snapshot_included)
+        self.assertIsNone(report.orbital_snapshot_error)
+        text = _pdf_text(report.pdf_bytes)
+        self.assertNotIn(ORBITAL_IMAGE_UNAVAILABLE_NOTE, text)
+        self.assertIn("Selected sample", text)
+        self.assertIn("predicted spacecraft temperature", text.lower())
+
+    def test_pdf_fallback_when_orbital_export_raises(self) -> None:
+        study = run_single_mode(_short_request())
+        with patch(
+            "satellite_thermal.report_pdf.export_orbital_snapshot_png",
+            return_value=(None, "ChromeNotFoundError: mock missing Chrome"),
+        ):
+            report = build_engineering_report_pdf(
+                study,
+                viz_curve=study.primary,
+                sample_index=0,
+                meta=default_report_meta(),
+            )
+        self.assertFalse(report.orbital_snapshot_included)
+        self.assertIn("mock missing Chrome", report.orbital_snapshot_error or "")
+        self.assertTrue(report.pdf_bytes.startswith(b"%PDF"))
+        text = _pdf_text(report.pdf_bytes)
+        self.assertIn(ORBITAL_IMAGE_UNAVAILABLE_NOTE, text)
+        self.assertIn("Selected sample", text)
+        self.assertIn("sunlit", text.lower())
+        self.assertIn("Heat-flow", text)
+        self.assertIn("Technical references", text)
+
+    def test_export_helper_swallows_plotly_exception(self) -> None:
+        class _Boom:
+            def to_image(self, **_kwargs):
+                raise RuntimeError("kaleido chrome missing")
+
+        png, err = export_orbital_snapshot_png(_Boom())
+        self.assertIsNone(png)
+        self.assertIsNotNone(err)
+        self.assertIn("kaleido chrome missing", err.lower())
+
+    def test_ensure_kaleido_sets_browser_path_when_chromium_exists(self) -> None:
+        report_pdf_mod._kaleido_browser_configured = False
+        fake_chrome = Path(__file__).resolve()
+        with patch.dict("os.environ", {}, clear=False):
+            os_environ = __import__("os").environ
+            os_environ.pop("BROWSER_PATH", None)
+            os_environ.pop("CHROME_PATH", None)
+            with patch(
+                "satellite_thermal.report_pdf._discover_system_chrome_path",
+                return_value=str(fake_chrome),
+            ):
+                configured = ensure_kaleido_browser_configured()
+            self.assertEqual(configured, str(fake_chrome))
+            self.assertEqual(os_environ.get("BROWSER_PATH"), str(fake_chrome))
+        report_pdf_mod._kaleido_browser_configured = False
+
+    def test_ensure_kaleido_missing_chrome_does_not_raise(self) -> None:
+        report_pdf_mod._kaleido_browser_configured = False
+        with patch.dict("os.environ", {}, clear=False):
+            os_environ = __import__("os").environ
+            os_environ.pop("BROWSER_PATH", None)
+            os_environ.pop("CHROME_PATH", None)
+            with patch(
+                "satellite_thermal.report_pdf._discover_system_chrome_path",
+                return_value=None,
+            ):
+                configured = ensure_kaleido_browser_configured()
+            self.assertIsNone(configured)
+        report_pdf_mod._kaleido_browser_configured = False
 
 
 class ReportPdfSampleArtifacts(unittest.TestCase):
@@ -246,7 +371,7 @@ class ReportPdfSampleArtifacts(unittest.TestCase):
             name = default_inspect_curve_name(study)
             curve = resolve_inspect_curve(curves, name, name)
             mid = max(0, len(curve.result.time_s) // 4)
-            pdf = build_engineering_report_pdf(
+            pdf = _build_pdf_bytes(
                 study,
                 viz_curve=curve,
                 sample_index=mid,
