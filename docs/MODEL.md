@@ -187,9 +187,11 @@ plane:
 s = (cos(beta), 0, sin(beta))
 ```
 
-Phase 2 uses `beta = 0`, so the Sun is `+X` and lies in the orbital plane.
-Position angle `theta` is measured from the sunward axis. The run starts at
-`theta = 0`, which is the sun-facing side, above the subsolar point:
+The Version 1.0 / default GUI case uses `beta = 0`, so the Sun is `+X` and
+lies in the orbital plane. The GUI now allows other beta values; the same
+Sun-vector and cylindrical-shadow definitions apply. Position angle `theta`
+is measured from the sunward axis. The run starts at `theta = 0`, which is
+the sun-facing side, above the subsolar point when beta = 0:
 
 ```text
 theta(t) = 2 * pi * t / T_orbit
@@ -204,6 +206,7 @@ mu = 3.986004418e14 m³/s²
 ```
 
 `T_orbit` is in seconds. With these inputs it is **5668.1444 s (94.4691 min)**.
+The period does not depend on beta.
 
 Eclipse is not a stored number of minutes. A position is in shadow when it is
 on the night side of the terminator plane and inside a cylinder of radius
@@ -214,9 +217,41 @@ r_vec · s_hat < 0
 |r_vec × s_hat| <= R_earth
 ```
 
-For this beta = 0 circle, that condition is true for an angle
-`2 * asin(R_earth / r)` centered on the anti-sun point. The corresponding
-duration is
+With the frame above,
+
+```text
+|r_vec × s| = r * sqrt(sin²(beta) + sin²(theta) * cos²(beta))
+```
+
+At the anti-sun point (`theta = pi`) the perpendicular distance to the umbra
+axis is `r |sin(beta)|`. Eclipse is therefore possible only when
+
+```text
+|beta| <= beta_critical = asin(R_earth / r) ≈ 68.007° at 500 km
+```
+
+**Classification:** derived geometric result (D) from the cylindrical-shadow
+definition; not `acos(R_earth / r)` (that complementary angle is ≈ 21.99° and
+is not the critical beta). For authoritative thermal-engineering discussion of
+beta and cylindrical-umbra eclipse, see Rickman, TFAWS 2023 *Introduction to
+On-Orbit Thermal Environments* (cylindrical-shadow simplification stated;
+eclipse onset from the projected-radius condition). The closed-form duration
+below is this project's derivation from the same cylinder test implemented in
+code.
+
+For `|beta| < beta_critical`,
+
+```text
+kappa = sqrt( ((R_earth/r)² - sin²(beta)) / cos²(beta) )
+t_eclipse = (T_orbit / pi) * asin(kappa)
+```
+
+At `|beta| = beta_critical` the orbit is tangent to the cylinder at one
+anti-sun point (measure-zero contact). Analytical duration is reported as 0.
+The discrete test still counts that tangent sample because `<=` includes the
+boundary. For `|beta| > beta_critical` there is continuous sunlight.
+
+At beta = 0 this reduces to
 
 ```text
 t_eclipse = T_orbit * asin(R_earth / r) / pi = 2141.523 s (35.692 min)
@@ -228,13 +263,21 @@ when the test is true at the start of the step. That sampling gives
 | Quantity | Value |
 | --- | --- |
 | Orbital period | 5668.1444 s (94.4691 min) |
-| Eclipse per orbit | 2141.0000 s (35.6833 min) |
-| Sunlight per orbit | 3527.1444 s (58.7857 min) |
+| Eclipse per orbit (β = 0°) | 2141.0000 s (35.6833 min) |
+| Sunlight per orbit (β = 0°) | 3527.1444 s (58.7857 min) |
 
 The 0.523 s difference from the closed-form eclipse is the 1 s sampling of
-the entry and exit. Eclipse plus sunlight equals one period. About 36 minutes
-of eclipse in a 94.5-minute low-Earth orbit is the expected result for a
-cylindrical shadow at beta = 0.
+the entry and exit. Eclipse plus sunlight equals one period.
+
+### Beta verification table (500 km, dt = 1 s)
+
+| β (°) | Analytical eclipse (min) | Numerical eclipse (min) | Notes |
+| --- | --- | --- | --- |
+| 0 | 35.692 | 35.683 | V1 reference |
+| ±30 | 33.788 | 33.783 | ±β identical |
+| 60 | 21.779 | 21.783 | shorter eclipse |
+| 68 | 0.746 | 0.750 | just below critical ≈ 68.007° |
+| 75 | 0.000 | 0.000 | continuous sunlight |
 
 ### Thermal coupling
 
@@ -267,16 +310,23 @@ This is a simplified transient model result, not a flight prediction.
 
 ### Assumptions and limitations
 
-- The orbit is circular. Altitude, beta, and the solar direction do not change.
+- The orbit is circular. Altitude and beta are constant over a run; the Sun
+  direction is fixed in the simulation inertial frame.
 - Earth is a smooth sphere. There is no atmosphere, refraction, or penumbra,
   so the shadow edge is sharp.
-- Beta = 0 gives the longest eclipse for this altitude. A nonzero beta would
-  shorten it, and a high enough beta would remove it. Phase 2 does not sweep
-  beta.
-- Projected area does not change with attitude. The satellite is still one
-  isothermal node.
+- Beta = 0 gives the longest eclipse for this altitude. Eclipse shortens as
+  `|beta|` increases and vanishes for `|beta| >= asin(R_earth / r)`.
+- **Beta changes eclipse exposure (and Sun direction in the 3D view).** It does
+  **not** yet change the solar projected area. Direct solar heating still uses
+  the fixed input `A_projected` whenever the satellite is sunlit. Orientation-
+  dependent face solar absorption is reserved for Checkpoint 2 / Version 2.0
+  enhanced mode.
+- The satellite is still one isothermal node.
 - Eclipse duration reported by the 1 s run is the sampled shadow test, so it
-  can differ from `asin(R/r)` by less than one step.
+  can differ from the closed-form duration by about one step.
+- Earth IR remains a constant effective-area load; albedo still uses the
+  in-plane angle factor. Variable beta does not yet make planetary heating
+  attitude- or beta-dependent beyond the shared eclipse gate for albedo.
 - Phase 2 itself still leaves Earth infrared off. Phase 3A adds that load
   optionally. Albedo remains reserved for a later phase.
 - The Phase 1 continuous-sunlight case remains `python scripts/run_phase1.py`.
@@ -548,8 +598,265 @@ See [`REFERENCES.md`](REFERENCES.md) for public sources and claim boundaries.
 ### Remaining limitations
 
 - Single lumped node; no multi-node conduction network.
-- Fixed effective areas; no CAD geometry or attitude control.
-- Local Streamlit app only; not deployed.
+- Legacy mode uses fixed effective areas; enhanced mode adds rectangular-bus
+  face solar absorption and face-sum emission with prescribed attitudes only
+  (not closed-loop ACS).
+- Earth IR and albedo remain Version 1.0 effective-area loads in both modes.
+- 3D wing panels are visual-only and are not thermal surfaces.
 - No experimental / flight validation.
 - 3D scene is illustrative geometry synchronized to the orbit/eclipse
-  state, not a photoreal mission animation.
+  state and prescribed bus orientation, not a photoreal mission animation.
+
+## Version 2.0 — Checkpoint 2: attitude-dependent solar heating
+
+### Model modes
+
+| Mode | Solar absorption | Radiative emission | Earth IR / albedo |
+| --- | --- | --- | --- |
+| **Legacy** (default) | `α A_projected S` when sunlit | `ε σ A_radiating T⁴` | V1 effective areas |
+| **Enhanced** | `Σ α_i S A_i max(0, n_i·s)` | `Σ ε_i σ A_i T⁴` | V1 effective areas (retained) |
+
+Legacy mode with β = 0° preserves the Version 1.0 reference finals. Enhanced
+mode with a 0.1 m cube, fixed-inertial attitude, and β = 0° reproduces the
+same solar and radiation terms because only the +X face is sunlit and
+`A_total = 0.06 m²`.
+
+### Coordinate systems
+
+- **Inertial:** Earth centre; orbit in XY; Sun `s = (cos β, 0, sin β)` toward
+  the Sun (same convention as the cylindrical eclipse test).
+- **Orbital basis:** `r̂`, `θ̂`, `ĥ` with `r̂ × θ̂ = ĥ`.
+- **Body:** right-handed +X, +Y, +Z; length/width/height along those axes.
+
+### Attitude modes (prescribed geometry only)
+
+1. **Fixed inertial** — body axes = inertial XYZ.
+2. **Nadir-pointing** — +Z = nadir (−`r̂`), +X = along-track (`θ̂`), +Y completes RH.
+3. **Sun-pointing** — +X = `s`; +Y from `ĥ × s`, with fallback to `θ̂` (then
+   inertial) when `|s · ĥ|` is too close to 1 (singular roll reference).
+
+### Planetary heating choice (Checkpoint 2)
+
+Attitude-dependent solar heating does **not** automatically make Earth IR or
+albedo attitude-dependent. This checkpoint **retains** the Version 1.0
+effective-area planetary loads and labels that limitation explicitly.
+Implementing face-to-Earth view factors is deferred.
+
+### Sources
+
+Face solar heating `Q = α S A max(0, n·s)` follows the standard projected-area
+/ incidence-angle form used in small-satellite thermal notes (e.g. NASA
+SmallSat Institute materials and Cottingham / TFAWS on-orbit environment
+lectures). See [`SOURCE_TRACEABILITY.md`](SOURCE_TRACEABILITY.md).
+
+## Version 2.0 — Checkpoint 3: time-dependent internal power
+
+### Energy balance
+
+```text
+m * cp * dT/dt = Q_solar(t) + Q_earth_ir(t) + Q_albedo(t) + Q_internal(t) - Q_radiated(t)
+```
+
+`Q_internal(t)` is evaluated at the **start** of each explicit Euler step, using
+the same time and eclipse flag as solar gating.
+
+### Schedule kinds
+
+| Kind | Rule |
+| --- | --- |
+| `constant` | `Q_internal =` GUI Internal heat (W); default 5 W (V1) |
+| `eclipse_reduced` | sunlight → nominal W; eclipse → standby W (actual β-aware eclipse) |
+| `periodic_high` | within each period `[nP,(n+1)P)`, high on `[nP, nP+D)`, else base |
+| `custom_intervals` | half-open `[start,end)`; no overlaps; else baseline Internal heat |
+
+### Numerical note (Euler discontinuities)
+
+Explicit Euler still holds all loads constant over a completed step, and the
+user-selected `time_step_s` remains the **maximum** step.
+
+For `periodic_high` and `custom_intervals`, the integrator queries
+`next_scheduled_transition_s` and **shortens** a step that would cross a known
+power discontinuity so the next sample begins exactly on the half-open
+boundary. That prevents short off-grid pulses (for example a 1 s pulse inside a
+5 s nominal step) from being skipped. Remaining time after the event continues
+with the updated `Q_internal` under the same maximum-step limit.
+
+**Pulse energy terminology.** A scheduled pulse that sets total internal power to
+100 W for one second while the baseline schedule is 5 W contributes
+`(100 − 5) × 1 s = 95 J` of *additional* energy relative to the baseline (not
+100 J). The absolute energy delivered by the pulse interval itself is
+`100 W × 1 s = 100 J`. Independent off-grid checks in this repository report the
+additional 95 J figure so temperature deltas can be compared against
+`ΔE / (m · cp)`.
+
+`constant` schedules take the ordinary fixed-step path (Version 1.0 baselines
+unchanged).
+
+`eclipse_reduced` still uses the **sampled** cylindrical-eclipse flag at each
+step start. Eclipse entry/exit are **not** treated as separate schedule events
+in Checkpoint 3; resolving them remains an orbital time-step approximation
+(same class of limitation as the legacy solar eclipse gate).
+
+### GUI sample inspection and resource limits
+
+Event-aware stepping produces **nonuniform** timestamps. The Streamlit time
+control therefore selects a **stored sample index** (with physical time
+readouts) so every power-transition sample remains reachable. Instantaneous
+heat-flow, power-state, temperature marker, and 3D views stay synchronized to
+that index on the inspected curve.
+
+Interactive runs estimate samples as nominal Euler count **plus** scheduled
+power-event splits, and reject requests above `MAX_GUI_SAMPLES` (250 000). The
+solver also enforces `max_samples` at runtime and raises rather than returning a
+truncated history that could be mistaken for a complete orbit set.
+
+### Illustrative power levels
+
+Default standby / nominal / high-power values (1 / 5 / 15 W) are **illustrative
+assumptions (C)**, not a published spacecraft power budget. No battery or EPS
+model is included.
+
+## Version 2.0 — Checkpoint 4: hot / nominal / cold screening scenarios
+
+### Modelling convention choice
+
+Two common LEO environmental screening conventions were considered:
+
+| Convention | Idea | Used here? |
+| --- | --- | --- |
+| NASA Preferred Practice GD-AP-2301 energy-balance triples | Seasonal solar + paired albedo; `E_olr = (1−a)S/4` | **Yes** for Hot/Cold fluxes |
+| ERBE / STEM / mission NEDD statistical albedo–OLR pairs | Inclination- and time-constant-dependent extremes where max albedo and max OLR are not stacked independently | Documented alternative only |
+
+Because this simulator holds planetary albedo and OLR **constant** over an orbit
+(Version 1.0 effective-area Earth loads), energy-balance triples are the
+physically consistent match. Statistical ERBE pairs remain valuable for
+mission design with short thermal time constants but are **not** the preset
+basis here.
+
+GD-AP-2301 Table 1 combinations are intended for **orbit-average** screening
+analyses. In this GUI they are applied as **simplified constant** environmental
+parameters (fixed S, a, and E_olr for every time step), matching the repository’s
+constant-load Earth IR / albedo model rather than computing orbit-averaged
+incident heat rates on oriented surfaces.
+
+Independently stacking every maximum (or every minimum) environmental and
+operational input was rejected as non-defensible for screening.
+
+### Preset table (500 km educational spacecraft)
+
+| Parameter | Nominal | Hot screening | Cold screening | Classification |
+| --- | --- | --- | --- | --- |
+| Solar irradiance `S` | 1361 W/m² | 1422 W/m² | 1318 W/m² | Nominal: repo V1 (C); Hot/Cold: NASA GD-AP-2301 winter/summer (B) |
+| Earth Bond albedo `a` | 0.30 | 0.35 | 0.25 | Nominal: repo/GD-AP-2301 nominal (B/C); Hot/Cold: GD-AP-2301 (B) |
+| Earth OLR `E_olr` | 240 W/m² | `(1−0.35)×1422/4 ≈ 231.075` W/m² | `(1−0.25)×1318/4 ≈ 247.125` W/m² | Nominal: repo V1 (C); Hot/Cold: derived from GD-AP-2301 formula (D from B) |
+| Orbital beta `β` | 0° | just above `β_c(h)` (≈ 70° at 500 km) | 0° | Nominal: V1 reference (C); Hot/Cold beta choice: illustrative screening (C) |
+| Earth IR + albedo flags | both on | both on | both on | Modelling assumption (C) |
+| Internal power | constant 5 W | constant 15 W | constant 1 W | Illustrative operating levels (C); ECSS training notes high/low dissipation for hot/cold cases as a practice, not a wattage mandate |
+| Geometry / α / ε | unchanged | unchanged | unchanged | User-controlled; EOL coating degradation is **not** applied |
+
+**Important:** Hot OLR is *lower* than Cold OLR under energy balance. The Cold
+case is still colder because of lower solar, lower albedo, maximum eclipse
+(`β = 0°`), and lower internal power.
+
+Presets are **screening scenarios**, not universal worst-case spacecraft
+conditions. Custom mode leaves sidebar values unchanged.
+
+### GUI behaviour
+
+- Scenario selector: Nominal / Hot / Cold / Custom.
+- While Nominal / Hot / Cold is selected, preset-owned inputs (S, a, E_olr, β,
+  constant internal power, power-schedule kind, and planetary-load flags) are
+  **locked** and re-synchronized from the preset definition (Hot β updates when
+  altitude changes). Custom re-enables editing with no hidden overrides.
+- Compare Hot/Nominal/Cold mode solves all three overlays on shared spacecraft
+  settings (mass, coatings, areas, altitude, step, thermal model, attitude).
+- Existing single, reference-compare, and A/B/C environment modes remain and
+  may optionally apply one preset overlay before solving.
+
+## Version 2.0 — Checkpoint 5: CubeSat-inspired configurations
+
+### CDS mechanical envelopes (sourced)
+
+Cal Poly **CubeSat Design Specification (CDS) Rev 14.1** (February 2022) defines
+form-factor envelopes and typical maximum masses (Table 1 / Appendix B):
+
+| Form factor | Envelope (mm) | Typical max mass (kg) |
+| --- | --- | --- |
+| 1U | 100.0 × 100.0 × 113.5 | 2.00 |
+| 3U | 100.0 × 100.0 × 340.5 | 6.00 |
+
+PDF: https://www.nasa.gov/wp-content/uploads/2018/01/cubesatdesignspecificationrev14_12022-02-09.pdf
+
+The 100 mm cross-section is the rail envelope; Z includes rail/standoff extent
+beyond a naïve 100 mm “unit cube.” Extra “tuna can” volume for some 3U
+dispensers is **not** modelled here.
+
+**Idealized radiating geometry.** The rectangular L×W×H bus used for face solar
+absorption and face-sum radiation is an **idealized closed envelope**, not an
+exact representation of exposed flight-hardware surfaces (rails, gaps,
+connectors, antennas, multi-layer insulation layups, or deployables). Exterior
+area in this model equals the six faces of that rectangular prism.
+
+### Configurations in this repository
+
+| Preset | Dimensions | Mass used here | Thermal model | Classification |
+| --- | --- | --- | --- | --- |
+| Legacy simplified | 0.1 m cube (viz) | 5 kg | Legacy fixed areas 0.01 / 0.06 m² | Repo V1 educational (C) |
+| Illustrative 0.1 m cube | 0.1 × 0.1 × 0.1 m | 5 kg | Enhanced; A_rad = 0.06 m² | Illustrative (C) |
+| Generic 1U-inspired | CDS 1U envelope | 1.50 kg (under 2.00 kg max) | Enhanced; areas from faces | Envelope (B); mass/cp/α/ε (C) |
+| Generic 3U-inspired | CDS 3U envelope | 4.00 kg (under 6.00 kg max) | Enhanced; areas from faces | Envelope (B); mass/cp/α/ε (C) |
+| Custom | User | User | User | User |
+
+Effective `cp = 900 J/(kg·K)` is a **lumped** whole-spacecraft approximation
+(structure + electronics + batteries, etc.), **not** derived from aluminium
+rail material alone and **not** specified by the CDS.
+
+### Derived exterior areas
+
+For length `l`, width `w`, height `h` along body +X/+Y/+Z:
+
+```text
+A_±x = w h
+A_±y = l h
+A_±z = l w
+A_total = 2 (w h + l h + l w)
+```
+
+Enhanced solar heating sums face contributions `α_i S A_i max(0, n_i·s)`.
+Enhanced radiation sums `ε_i σ A_i T⁴` over the same six faces (no
+double-counting). Visual solar wings remain decorative only.
+
+### GUI behaviour
+
+Spacecraft presets lock and synchronize dimensions, mass, effective cp, optics,
+thermal-model kind, and related area fields so the sidebar cannot contradict
+the solver. Custom unlocks editing. Hot/Nominal/Cold scenario compare continues
+to share one spacecraft configuration across all three environmental cases.
+
+## Version 2.0 — Checkpoint 6: integration and numerical verification
+
+Checkpoint 6 does **not** add new physics. It combines Checkpoints 1–5 and
+checks consistency:
+
+- Integrated Cases A–E (generic 3U; β = 0° vs 75°; scheduled power; attitudes;
+  Hot/Nominal/Cold) in `tests/test_checkpoint6_integration.py`.
+- Discrete energy accounting for explicit Euler:
+  `Σ_i Q_net(t_i) (t_{i+1} − t_i) = m cp (T_final − T_initial)` when `Q_net`
+  is evaluated at the same step-start state the integrator uses. Agreement is
+  to floating-point tolerance. This verifies discrete conservation of the
+  numerical scheme — **not** experimental thermal accuracy.
+- Orbital geometry rebuilt independently (period, `β_c`, eclipse edges, face
+  areas, right-handed attitudes, sun-pointing singularity path).
+- Time-step study on a nominal 3U LEO case: final temperatures for
+  `dt = 10, 5, 2, 1` s remain within about 0.05 °C of the 1 s reference.
+  Differences are **non-monotonic** in `dt` because eclipse boundaries are
+  still sampled on the orbital grid (unlike power-schedule events). For the
+  stated educational model and default steps of a few seconds, that sensitivity
+  is acceptable and documented.
+- Legacy Version 1.0 environment stack finals remain
+  −12.5661 / −6.8313 / −4.5386 °C at 500 km, five orbits, `dt = 1` s.
+- GUI: “Compare to Reference Defaults” clarifies that the modified case may
+  change orbit and operations as well as spacecraft properties.
+
+See `docs/SOURCE_TRACEABILITY.md` and `docs/VERIFICATION.md` for the source-audit table and
+claim boundaries.

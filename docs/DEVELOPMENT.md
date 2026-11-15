@@ -16,10 +16,14 @@ new capability was added:
 4. Parameter sensitivity studies
 5. Streamlit GUI with comparison modes, synchronized 3D orbit view, and
    heat-flow diagnostics
-6. Usability and documentation polish for public release
+6. Version 2 physics checkpoints (beta, attitude/faces, power schedules,
+   screening scenarios, CubeSat configurations) with integration verification
+7. UI simplification, PDF engineering reports, and public-release documentation
 
 Physics live in `satellite_thermal/`. The GUI (`app.py`) and CLI scripts under
 `scripts/` call those solvers; they do not re-implement the thermal equations.
+PDF reporting (`satellite_thermal/report_pdf.py`) formats completed study
+results only — it does not re-solve the thermal model.
 
 ## AI-assisted development
 
@@ -52,11 +56,15 @@ assumptions are the primary evidence that the model behaves as specified.
 | Tests | `tests/` (`python -m unittest discover -s tests -v`) |
 | Detailed model notes | `docs/MODEL.md` |
 | References | `docs/REFERENCES.md` |
-| Generated CLI plots | `outputs/` (mostly gitignored) |
+| Verification summary | `docs/VERIFICATION.md` |
+| PDF report notes | `docs/PDF_REPORT.md` |
+| Generated CLI / PDF samples | `outputs/` (mostly gitignored) |
 | Doc screenshots / example figures | `docs/images/` |
 
 ## Related documents
 
 - [`../README.md`](../README.md) — overview, install, run
 - [`MODEL.md`](MODEL.md) — equations, assumptions, verification notes
+- [`VERIFICATION.md`](VERIFICATION.md) — integrated verification summary
+- [`PDF_REPORT.md`](PDF_REPORT.md) — engineering PDF report
 - [`REFERENCES.md`](REFERENCES.md) — engineering references and claim boundaries

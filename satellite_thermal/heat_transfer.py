@@ -134,3 +134,33 @@ def temperature_derivative(
     net_power_w = absorbed_solar + internal_heat + earth_ir + albedo - emitted
     thermal_capacity_j_per_k = mass * specific_heat
     return net_power_w / thermal_capacity_j_per_k
+
+
+def energy_balance_rate(
+    temperature_k: float,
+    mass_kg: float,
+    specific_heat_j_per_kg_k: float,
+    q_solar_w: float,
+    q_internal_w: float,
+    q_radiated_w: float,
+    q_earth_ir_w: float = 0.0,
+    q_albedo_w: float = 0.0,
+) -> float:
+    """dT/dt from precomputed heat loads, in K/s.
+
+    Used by the enhanced face-based solar / radiation path so the integrator
+    and GUI heat-flow panel share the same watt-level terms.
+    """
+    require_positive("temperature_k", temperature_k)
+    mass = require_positive("mass_kg", mass_kg)
+    specific_heat = require_positive(
+        "specific_heat_j_per_kg_k", specific_heat_j_per_kg_k
+    )
+    q_solar = require_finite_number("q_solar_w", q_solar_w)
+    q_internal = require_finite_number("q_internal_w", q_internal_w)
+    q_radiated = require_finite_number("q_radiated_w", q_radiated_w)
+    q_earth_ir = require_finite_number("q_earth_ir_w", q_earth_ir_w)
+    q_albedo = require_finite_number("q_albedo_w", q_albedo_w)
+    return (
+        q_solar + q_internal + q_earth_ir + q_albedo - q_radiated
+    ) / (mass * specific_heat)

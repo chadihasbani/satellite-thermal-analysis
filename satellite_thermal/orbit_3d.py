@@ -10,6 +10,7 @@ import math
 from functools import lru_cache
 from pathlib import Path
 
+from satellite_thermal.attitude import AttitudeMode, body_axes_inertial, parse_attitude_mode
 from satellite_thermal.orbit import (
     CircularOrbit,
     in_eclipse_at_time,
@@ -19,10 +20,30 @@ from satellite_thermal.orbit import (
     satellite_position_m,
     sun_direction,
 )
-from satellite_thermal.orbital_simulation import OrbitalThermalResult
+from satellite_thermal.orbital_simulation import (
+    THERMAL_MODEL_ENHANCED,
+    OrbitalThermalResult,
+    parse_thermal_model,
+)
 from satellite_thermal.units import kelvin_to_celsius
 
 _EARTH_MAP_PATH = Path(__file__).resolve().parents[1] / "assets" / "earth_map.jpg"
+
+# Visual-only axial tilt so Earth does not sit “upright” relative to the
+# orbital XY plane. Does not change the thermal solver geometry.
+EARTH_AXIAL_TILT_RAD = math.radians(23.44)
+
+
+def _rotate_about_y(
+    x: float,
+    y: float,
+    z: float,
+    angle_rad: float,
+) -> tuple[float, float, float]:
+    """Rotate a point about +Y (used to tip Earth's geographic poles)."""
+    cos_a = math.cos(angle_rad)
+    sin_a = math.sin(angle_rad)
+    return (x * cos_a + z * sin_a, y, -x * sin_a + z * cos_a)
 
 
 @lru_cache(maxsize=2)
@@ -118,8 +139,14 @@ def _earth_textured_mesh(
     n_lat: int = 128,
     n_lon: int = 256,
     mtime_ns: int = 0,
+    axial_tilt_rad: float = EARTH_AXIAL_TILT_RAD,
 ):
-    """Textured Earth sphere. Day/night comes from Plotly lighting + mild bake."""
+    """Textured Earth sphere with a fixed visual axial tip.
+
+    Geographic lon/lat still drive the map sample. Vertices are then tipped by
+    ``axial_tilt_rad`` so the poles are not straight “up” relative to the
+    orbital XY plane. Day/night shading uses the tipped surface normal.
+    """
     del mtime_ns  # cache key only
     sun = (sun_x, sun_y, sun_z)
     xs: list[float] = []
@@ -132,9 +159,11 @@ def _earth_textured_mesh(
         sin_lat = math.sin(lat)
         for j in range(n_lon + 1):
             lon = 2.0 * math.pi * j / n_lon
-            nx = cos_lat * math.cos(lon)
-            ny = cos_lat * math.sin(lon)
-            nz = sin_lat
+            # Geographic unit normal (untilted Earth-fixed frame).
+            gx = cos_lat * math.cos(lon)
+            gy = cos_lat * math.sin(lon)
+            gz = sin_lat
+            nx, ny, nz = _rotate_about_y(gx, gy, gz, axial_tilt_rad)
             xs.append(radius_m * nx)
             ys.append(radius_m * ny)
             zs.append(radius_m * nz)
@@ -151,8 +180,13 @@ def _earth_textured_mesh(
 
 
 @lru_cache(maxsize=2)
-def _atmosphere_mesh(radius_m: float, n_lat: int = 48, n_lon: int = 96):
-    """Thin translucent shell for a soft atmospheric limb."""
+def _atmosphere_mesh(
+    radius_m: float,
+    n_lat: int = 48,
+    n_lon: int = 96,
+    axial_tilt_rad: float = EARTH_AXIAL_TILT_RAD,
+):
+    """Thin translucent shell for a soft atmospheric limb (same tip as Earth)."""
     shell_r = radius_m * 1.018
     xs: list[float] = []
     ys: list[float] = []
@@ -164,34 +198,85 @@ def _atmosphere_mesh(radius_m: float, n_lat: int = 48, n_lon: int = 96):
         sin_lat = math.sin(lat)
         for j in range(n_lon + 1):
             lon = 2.0 * math.pi * j / n_lon
-            xs.append(shell_r * cos_lat * math.cos(lon))
-            ys.append(shell_r * cos_lat * math.sin(lon))
-            zs.append(shell_r * sin_lat)
+            gx = cos_lat * math.cos(lon)
+            gy = cos_lat * math.sin(lon)
+            gz = sin_lat
+            nx, ny, nz = _rotate_about_y(gx, gy, gz, axial_tilt_rad)
+            xs.append(shell_r * nx)
+            ys.append(shell_r * ny)
+            zs.append(shell_r * nz)
             colors.append("rgb(120,170,255)")
     i_idx, j_idx, k_idx = _sphere_triangle_indices(n_lat, n_lon)
     return xs, ys, zs, i_idx, j_idx, k_idx, colors
 
 
+def _orthonormal_basis_from_axis(
+    axis: tuple[float, float, float],
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    """Two unit vectors spanning the plane perpendicular to ``axis``."""
+    ax, ay, az = axis
+    # Prefer a reference that is not nearly parallel to the cylinder axis.
+    if abs(ax) < 0.9:
+        ref = (1.0, 0.0, 0.0)
+    else:
+        ref = (0.0, 1.0, 0.0)
+    ux = ay * ref[2] - az * ref[1]
+    uy = az * ref[0] - ax * ref[2]
+    uz = ax * ref[1] - ay * ref[0]
+    u_mag = math.sqrt(ux * ux + uy * uy + uz * uz)
+    if u_mag == 0.0:
+        raise ValueError("axis must be a non-zero vector.")
+    u = (ux / u_mag, uy / u_mag, uz / u_mag)
+    vx = ay * u[2] - az * u[1]
+    vy = az * u[0] - ax * u[2]
+    vz = ax * u[1] - ay * u[0]
+    v_mag = math.sqrt(vx * vx + vy * vy + vz * vz)
+    v = (vx / v_mag, vy / v_mag, vz / v_mag)
+    return u, v
+
+
 def _shadow_cylinder_mesh(
     earth_radius_m: float,
     length_m: float,
+    sun_direction_vector: tuple[float, float, float] = (1.0, 0.0, 0.0),
     n_theta: int = 28,
     n_axial: int = 12,
 ):
-    """Cylinder along -X (anti-sun for beta = 0) representing the umbra."""
+    """Cylinder of radius Earth along -s (anti-sun), matching the umbra test."""
+    sx, sy, sz = sun_direction_vector
+    s_mag = math.sqrt(sx * sx + sy * sy + sz * sz)
+    if s_mag == 0.0:
+        raise ValueError("sun_direction_vector must be non-zero.")
+    sun = (sx / s_mag, sy / s_mag, sz / s_mag)
+    axis = (-sun[0], -sun[1], -sun[2])
+    u, v = _orthonormal_basis_from_axis(axis)
     xs: list[list[float]] = []
     ys: list[list[float]] = []
     zs: list[list[float]] = []
     for i in range(n_axial + 1):
-        x = -length_m * i / n_axial
+        along = length_m * i / n_axial
         row_x: list[float] = []
         row_y: list[float] = []
         row_z: list[float] = []
         for j in range(n_theta + 1):
             ang = 2.0 * math.pi * j / n_theta
-            row_x.append(x)
-            row_y.append(earth_radius_m * math.cos(ang))
-            row_z.append(earth_radius_m * math.sin(ang))
+            cos_a = math.cos(ang)
+            sin_a = math.sin(ang)
+            px = (
+                axis[0] * along
+                + earth_radius_m * (cos_a * u[0] + sin_a * v[0])
+            )
+            py = (
+                axis[1] * along
+                + earth_radius_m * (cos_a * u[1] + sin_a * v[1])
+            )
+            pz = (
+                axis[2] * along
+                + earth_radius_m * (cos_a * u[2] + sin_a * v[2])
+            )
+            row_x.append(px)
+            row_y.append(py)
+            row_z.append(pz)
         xs.append(row_x)
         ys.append(row_y)
         zs.append(row_z)
@@ -286,89 +371,107 @@ def _spacecraft_meshes(
     position: tuple[float, float, float],
     orbital_angle_rad: float,
     visual_scale_m: float,
+    body_x: tuple[float, float, float] | None = None,
+    body_y: tuple[float, float, float] | None = None,
+    body_z: tuple[float, float, float] | None = None,
+    body_length_m: float = 0.1,
+    body_width_m: float = 0.1,
+    body_height_m: float = 0.1,
 ):
-    """Illustrative smallsat: bus, solar wings, antenna, thrusters.
+    """Illustrative smallsat: bus, visual-only solar wings, antenna, thrusters.
 
-    Orientation is fixed to the orbit frame. Visual only — not attitude dynamics.
+    Bus orientation follows the prescribed body axes when provided (enhanced
+    mode). Wing panels are decorative only and are not thermal surfaces.
+    Absolute craft size is enlarged for visibility; bus box proportions follow
+    length/width/height.
     """
     s = visual_scale_m
-    axis_r = (math.cos(orbital_angle_rad), math.sin(orbital_angle_rad), 0.0)
-    axis_t = (-math.sin(orbital_angle_rad), math.cos(orbital_angle_rad), 0.0)
-    axis_n = (0.0, 0.0, 1.0)
+    if body_x is None or body_y is None or body_z is None:
+        # Legacy visual default: LVLH-like (radial, along-track, orbit-normal).
+        axis_x = (math.cos(orbital_angle_rad), math.sin(orbital_angle_rad), 0.0)
+        axis_y = (-math.sin(orbital_angle_rad), math.cos(orbital_angle_rad), 0.0)
+        axis_z = (0.0, 0.0, 1.0)
+    else:
+        axis_x, axis_y, axis_z = body_x, body_y, body_z
 
-    # Main bus + slightly raised radiator / instrument deck.
+    # Map physical proportions onto the enlarged visual scale.
+    max_dim = max(body_length_m, body_width_m, body_height_m, 1e-9)
+    half_x = 0.55 * s * (body_length_m / max_dim)
+    half_y = 0.55 * s * (body_width_m / max_dim)
+    half_z = 0.55 * s * (body_height_m / max_dim)
+
     bus = _box_corners(
-        position, axis_r, axis_t, axis_n,
-        half_r=0.62 * s, half_t=0.48 * s, half_n=0.38 * s,
+        position, axis_x, axis_y, axis_z,
+        half_r=half_x, half_t=half_y, half_n=half_z,
     )
     deck = _box_corners(
-        _offset(position, axis_r, 0.08 * s),
-        axis_r, axis_t, axis_n,
-        half_r=0.50 * s, half_t=0.40 * s, half_n=0.42 * s,
+        _offset(position, axis_x, 0.06 * s),
+        axis_x, axis_y, axis_z,
+        half_r=0.85 * half_x, half_t=0.85 * half_y, half_n=1.05 * half_z,
     )
 
-    # Solar wings on ± orbit-normal, with short yoke stubs.
-    yoke_half_n = 0.22 * s
-    panel_half_n = 1.55 * s
-    panel_half_t = 0.14 * s
-    panel_half_r = 0.055 * s
-    yoke_offset = 0.55 * s
-    panel_offset = 1.45 * s
+    # Visual-only solar wings on ± body Y (not included in thermal face list).
+    yoke_half_n = 0.18 * s
+    panel_half_n = 0.12 * s
+    panel_half_t = 1.35 * s
+    panel_half_r = 0.05 * s
+    yoke_offset = half_y + 0.20 * s
+    panel_offset = half_y + 1.20 * s
     panels = []
     yokes = []
     for sign in (1.0, -1.0):
-        yoke_center = _offset(position, axis_n, sign * yoke_offset)
-        panel_center = _offset(position, axis_n, sign * panel_offset)
+        yoke_center = _offset(position, axis_y, sign * yoke_offset)
+        panel_center = _offset(position, axis_y, sign * panel_offset)
         yokes.append(
             _box_corners(
-                yoke_center, axis_r, axis_t, axis_n,
-                half_r=0.10 * s, half_t=0.10 * s, half_n=yoke_half_n,
+                yoke_center, axis_x, axis_y, axis_z,
+                half_r=0.08 * s, half_t=yoke_half_n, half_n=0.08 * s,
             )
         )
         panels.append(
             _box_corners(
-                panel_center, axis_r, axis_t, axis_n,
+                panel_center, axis_x, axis_y, axis_z,
                 half_r=panel_half_r, half_t=panel_half_t, half_n=panel_half_n,
             )
         )
-        # Thin cell highlight strip on each wing.
+        # Thin cell highlight strip on each wing (visual only).
         panels.append(
             _box_corners(
-                _offset(panel_center, axis_r, 0.02 * s),
-                axis_r, axis_t, axis_n,
+                _offset(panel_center, axis_x, 0.02 * s),
+                axis_x, axis_y, axis_z,
                 half_r=0.02 * s, half_t=panel_half_t * 0.92, half_n=panel_half_n * 0.92,
             )
         )
 
-    # High-gain dish (stacked discs) on a short boom, anti-velocity side.
-    boom_root = _offset(position, axis_t, -0.55 * s)
+    # High-gain dish (stacked discs) on a short boom — visual detail only.
+    boom_root = _offset(position, axis_y, -0.55 * s)
     boom = _box_corners(
-        boom_root, axis_r, axis_t, axis_n,
+        boom_root, axis_x, axis_y, axis_z,
         half_r=0.06 * s, half_t=0.28 * s, half_n=0.06 * s,
     )
-    dish_center = _offset(position, axis_t, -0.95 * s)
+    dish_center = _offset(position, axis_y, -0.95 * s)
     dish_outer = _box_corners(
-        dish_center, axis_r, axis_t, axis_n,
+        dish_center, axis_x, axis_y, axis_z,
         half_r=0.42 * s, half_t=0.05 * s, half_n=0.42 * s,
     )
     dish_inner = _box_corners(
-        _offset(dish_center, axis_t, -0.04 * s),
-        axis_r, axis_t, axis_n,
+        _offset(dish_center, axis_y, -0.04 * s),
+        axis_x, axis_y, axis_z,
         half_r=0.28 * s, half_t=0.04 * s, half_n=0.28 * s,
     )
 
-    # Aft thruster block + two nozzles.
-    aft = _offset(position, axis_t, 0.58 * s)
+    # Aft thruster block + two nozzles — visual detail only.
+    aft = _offset(position, axis_y, 0.58 * s)
     thruster_block = _box_corners(
-        aft, axis_r, axis_t, axis_n,
+        aft, axis_x, axis_y, axis_z,
         half_r=0.22 * s, half_t=0.12 * s, half_n=0.18 * s,
     )
     nozzles = []
     for side in (-0.12 * s, 0.12 * s):
         nozzles.append(
             _box_corners(
-                _offset(_offset(aft, axis_n, side), axis_t, 0.16 * s),
-                axis_r, axis_t, axis_n,
+                _offset(_offset(aft, axis_z, side), axis_y, 0.16 * s),
+                axis_x, axis_y, axis_z,
                 half_r=0.07 * s, half_t=0.10 * s, half_n=0.07 * s,
             )
         )
@@ -384,6 +487,11 @@ def build_orbit_3d_figure(
     orbit: CircularOrbit,
     sample_index: int,
     title: str = "Orbital geometry",
+    attitude_mode: str = AttitudeMode.FIXED_INERTIAL.value,
+    body_length_m: float = 0.1,
+    body_width_m: float = 0.1,
+    body_height_m: float = 0.1,
+    thermal_model: str = "legacy",
 ):
     """Create a Plotly 3D figure for one synchronized simulation sample."""
     import plotly.graph_objects as go
@@ -396,6 +504,8 @@ def build_orbit_3d_figure(
     period = orbital_period_s(settings)
     earth_r = settings.earth_radius_m
     sun = sun_direction(settings.beta_rad)
+    model = parse_thermal_model(thermal_model)
+    attitude = parse_attitude_mode(attitude_mode)
 
     # Orbit path (one revolution samples).
     path_x = []
@@ -416,7 +526,7 @@ def build_orbit_3d_figure(
     status = "ECLIPSE" if eclipsed else "SUNLIT"
 
     shadow_x, shadow_y, shadow_z = _shadow_cylinder_mesh(
-        earth_r, length_m=2.2 * radius
+        earth_r, length_m=2.2 * radius, sun_direction_vector=sun
     )
     map_mtime = (
         _EARTH_MAP_PATH.stat().st_mtime_ns if _EARTH_MAP_PATH.is_file() else 0
@@ -518,7 +628,21 @@ def build_orbit_3d_figure(
     )
     # Visual scale is exaggerated so the craft is readable next to Earth.
     visual_scale = 0.078 * earth_r
-    bus_mesh, panel_mesh, detail_mesh = _spacecraft_meshes(sat, angle, visual_scale)
+    if model == THERMAL_MODEL_ENHANCED:
+        body_x, body_y, body_z = body_axes_inertial(attitude, angle, sun)
+    else:
+        body_x = body_y = body_z = None
+    bus_mesh, panel_mesh, detail_mesh = _spacecraft_meshes(
+        sat,
+        angle,
+        visual_scale,
+        body_x=body_x,
+        body_y=body_y,
+        body_z=body_z,
+        body_length_m=body_length_m,
+        body_width_m=body_width_m,
+        body_height_m=body_height_m,
+    )
     bus_color = "#6E6E73" if eclipsed else "#E8E8ED"
     panel_color = "#1C3D6E" if eclipsed else "#0A4D8C"
     detail_color = "#8E8E93" if eclipsed else "#D4D4D8"
@@ -553,7 +677,7 @@ def build_orbit_3d_figure(
             k=panel_mesh[5],
             color=panel_color,
             opacity=1.0,
-            name="Solar arrays",
+            name="Solar arrays (visual only)",
             hoverinfo="skip",
             flatshading=True,
             lighting={"ambient": 0.35, "diffuse": 0.75, "specular": 0.55, "roughness": 0.25},
@@ -593,15 +717,19 @@ def build_orbit_3d_figure(
         paper_bgcolor="#000000",
         plot_bgcolor="#000000",
         font={"color": "#F5F5F7", "family": "Helvetica, Arial, sans-serif"},
+        # Keep the user's camera angle when the time sample changes.
+        uirevision="orbit-3d-fixed-earth",
         scene={
             "xaxis": axis_style,
             "yaxis": axis_style,
             "zaxis": axis_style,
             "aspectmode": "data",
             "bgcolor": "#000000",
-            # Closer camera so Earth + orbit fill the frame on load (no empty letterboxing).
+            # Turntable: spin horizontally around a fixed up-axis (no Earth flips).
+            "dragmode": "turntable",
             "camera": {
-                "eye": {"x": 1.05, "y": 0.95, "z": 0.55},
+                "up": {"x": 0.0, "y": 0.0, "z": 1.0},
+                "eye": {"x": 1.25, "y": 1.05, "z": 0.55},
                 "center": {"x": 0.0, "y": 0.0, "z": 0.0},
             },
         },
@@ -616,8 +744,16 @@ def build_orbit_3d_figure(
         # Match the adjacent state panel height — do not create a tall scrollable well.
         height=520,
     )
+    attitude_note = (
+        f"enhanced · {attitude.value.replace('_', ' ')}"
+        if model == THERMAL_MODEL_ENHANCED
+        else "legacy visual orientation"
+    )
     figure.add_annotation(
-        text="Illustrative geometry · craft enlarged for visibility · not to scale",
+        text=(
+            "Earth tipped ~23° (visual) · craft enlarged · not to scale · "
+            f"drag to spin · {attitude_note}"
+        ),
         xref="paper",
         yref="paper",
         x=0.0,
