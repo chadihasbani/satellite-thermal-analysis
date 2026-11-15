@@ -101,14 +101,12 @@ h3 {
     font-size: 1.05rem;
     line-height: 1.5;
     color: #1D1D1F;
-    max-width: 40rem;
     margin: 0 0 0.35rem 0;
 }
 .sta-body {
     font-size: 0.95rem;
     line-height: 1.5;
     color: #6E6E73;
-    max-width: 42rem;
     margin: 0 0 1.0rem 0;
 }
 .sta-section-label {
@@ -337,6 +335,21 @@ def _apply_defaults() -> None:
     st.session_state.gui_mode = "single"
 
 
+def _apply_enhanced_cube() -> None:
+    """Switch to the illustrative enhanced cube via button callback.
+
+    Must run as ``on_click`` (before widgets render). Assigning
+    ``gui_spacecraft_configuration`` after the selectbox is created raises
+    ``StreamlitWidgetAlreadyInstantiatedError``.
+    """
+    cube_id = SpacecraftConfigurationId.ILLUSTRATIVE_CUBE.value
+    st.session_state.gui_spacecraft_configuration = cube_id
+    updates = sync_session_values_from_configuration(cube_id)
+    for key, value in updates.items():
+        st.session_state[key] = value
+    st.session_state._configuration_sync_id = cube_id
+
+
 def _mode_blurb(mode: str) -> str:
     return {
         "single": "Simulate one satellite with the settings you choose.",
@@ -439,21 +452,21 @@ _init_state()
 # --- Header ---
 st.title("Satellite Thermal Analysis")
 st.markdown(
-    '<p class="sta-lede">Explore how a satellite’s temperature changes as it orbits Earth.</p>',
+    '<p class="sta-lede">Predict spacecraft temperature through sunlight and eclipse '
+    "in low Earth orbit.</p>",
     unsafe_allow_html=True,
 )
 st.markdown(
-    '<p class="sta-body">This simulator models heating from sunlight, Earth’s infrared '
-    "radiation, reflected sunlight, and onboard equipment, alongside cooling through "
-    "thermal radiation. Choose a spacecraft, set its orbit and orientation, compare "
-    f"scenarios, and download an engineering PDF report. {TERM_HELP['single_node']}</p>",
+    '<p class="sta-body">This educational single-node model balances heating from the '
+    "Sun, Earth infrared, reflected sunlight, and onboard equipment against radiative "
+    "cooling to space. Configure the spacecraft and orbit, compare cases, and download "
+    "an engineering PDF report.</p>",
     unsafe_allow_html=True,
 )
 st.markdown(
     f'<p class="sta-body" style="font-size:0.88rem;color:#86868B;">'
-    f"Version {SIMULATOR_VERSION} · Built with Python, Streamlit, Matplotlib, and Plotly · "
-    "Developed with AI-assisted tooling (Cursor) under human engineering review · "
-    "Git-tracked open-source project</p>",
+    f"Version {SIMULATOR_VERSION} · Python · Streamlit · Matplotlib · Plotly · "
+    "Open-source · Reviewed engineering model</p>",
     unsafe_allow_html=True,
 )
 
@@ -564,26 +577,16 @@ with st.sidebar:
         st.caption("Detailed inputs for experienced users. Defaults are already set.")
 
         # Enhanced cube access (kept out of the primary four choices).
-        if st.button(
+        # Use on_click so session updates happen before widgets instantiate.
+        st.button(
             "Use Enhanced 0.1 m cube",
             use_container_width=True,
+            on_click=_apply_enhanced_cube,
             help=(
                 "Switch to the enhanced face-based model on a 0.1 m cube "
                 "(same size class as the Reference Satellite)."
             ),
-        ):
-            st.session_state.gui_spacecraft_configuration = (
-                SpacecraftConfigurationId.ILLUSTRATIVE_CUBE.value
-            )
-            updates = sync_session_values_from_configuration(
-                SpacecraftConfigurationId.ILLUSTRATIVE_CUBE.value
-            )
-            for key, value in updates.items():
-                st.session_state[key] = value
-            st.session_state._configuration_sync_id = (
-                SpacecraftConfigurationId.ILLUSTRATIVE_CUBE.value
-            )
-            st.rerun()
+        )
 
         st.markdown("##### Environmental conditions")
         scenario_options = scenario_select_options()
