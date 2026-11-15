@@ -43,14 +43,18 @@ class GuiModeTests(unittest.TestCase):
         self.assertFalse(curves[1].request.include_albedo)
         self.assertTrue(curves[2].request.include_earth_infrared)
         self.assertTrue(curves[2].request.include_albedo)
-        self.assertEqual(default_inspect_curve_name(study), ENV_CASE_C)
+        self.assertEqual(default_inspect_curve_name(study), ENV_CASE_A)
+        # Shared internal dissipation must feed every environmental case.
+        for curve in curves:
+            self.assertAlmostEqual(curve.request.internal_heat_w, study.primary.request.internal_heat_w)
 
     def test_environment_compare_preserves_shared_spacecraft(self) -> None:
-        request = _short(mass_kg=4.2, beta_deg=15.0)
+        request = _short(mass_kg=4.2, beta_deg=15.0, internal_heat_w=7.5)
         study = run_environment_comparison_mode(request)
         for curve in all_curves(study):
             self.assertAlmostEqual(curve.request.mass_kg, 4.2)
             self.assertAlmostEqual(curve.request.beta_deg, 15.0)
+            self.assertAlmostEqual(curve.request.internal_heat_w, 7.5)
 
 
 class LegacyBaselineTests(unittest.TestCase):

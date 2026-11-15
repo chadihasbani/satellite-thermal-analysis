@@ -110,8 +110,8 @@ class ReportPdfTests(unittest.TestCase):
 
     def test_power_schedule_rows_are_constant(self) -> None:
         rows = dict(power_schedule_detail_rows(_short_request(internal_heat_w=5.0)))
-        self.assertEqual(rows["Internal power schedule"], "constant")
-        self.assertIn("5", rows["Constant internal power"])
+        self.assertEqual(rows["Internal heat schedule"], "constant")
+        self.assertIn("5", rows["Internal heat dissipation"])
 
 
 class ReportPdfOrbitalExportTests(unittest.TestCase):

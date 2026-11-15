@@ -9,6 +9,9 @@ from __future__ import annotations
 import streamlit as st
 
 from satellite_thermal.gui_support import (
+    ENV_CASE_A,
+    ENV_CASE_B,
+    ENV_CASE_C,
     GuiRunRequest,
     all_curves,
     apply_spacecraft_configuration,
@@ -65,9 +68,47 @@ html, body, [class*="css"] {
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
 }
 .block-container {
-    padding-top: 1.75rem;
-    padding-bottom: 3.0rem;
-    max-width: 1120px;
+    padding-top: 1.6rem;
+    padding-bottom: 2.75rem;
+    max-width: 1100px;
+}
+section[data-testid="stSidebar"] {
+    padding-top: 0 !important;
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarHeader"] {
+    height: 2.4rem !important;
+    min-height: 2.4rem !important;
+    padding: 0.35rem 0.5rem 0 !important;
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarContent"],
+section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"],
+section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] {
+    padding-top: 0 !important;
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+    padding-top: 0.15rem !important;
+}
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3:first-of-type,
+section[data-testid="stSidebar"] .stMarkdown h3:first-of-type {
+    margin-top: 0 !important;
+    margin-bottom: 0.4rem !important;
+    padding-top: 0 !important;
+}
+section[data-testid="stSidebar"] .stMarkdown p {
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: #6E6E73;
+}
+.sta-sidebar-note {
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: #3A3A3C;
+    margin: 0.15rem 0 0.65rem 0;
+}
+@media (max-width: 900px) {
+    .block-container { padding-top: 1.1rem; max-width: 100%; }
+    .sta-state-panel { height: auto !important; min-height: 320px; }
+    .sta-state-grid, .sta-heat-grid { grid-auto-rows: minmax(4.2rem, auto); }
 }
 h1 {
     font-weight: 700 !important;
@@ -122,53 +163,80 @@ div[data-testid="stMetric"] [data-testid="stMetricValue"] {
 .sta-state-panel {
     background: #F5F5F7;
     border-radius: 16px;
-    padding: 1rem 1.1rem 0.85rem 1.1rem;
+    padding: 0.95rem 1rem;
     height: 560px;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    gap: 0.7rem;
 }
-.sta-state-panel h5 {
-    margin: 0 0 0.55rem 0 !important;
-    font-size: 0.95rem !important;
+.sta-panel-block {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+.sta-panel-block.sta-panel-status { flex: 0.9; }
+.sta-panel-block.sta-panel-heat { flex: 1.35; }
+.sta-state-panel h5,
+.sta-panel-heading {
+    margin: 0 0 0.45rem 0 !important;
+    font-size: 0.82rem !important;
     font-weight: 600 !important;
-    color: #1D1D1F !important;
+    letter-spacing: 0.01em;
+    color: #6E6E73 !important;
 }
 .sta-state-grid {
+    flex: 1;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 0.55rem;
+    grid-template-rows: 1fr 1fr;
+    gap: 0.5rem;
+    min-height: 0;
 }
 .sta-state-card {
     background: #FFFFFF;
     border-radius: 12px;
-    padding: 0.55rem 0.7rem;
+    padding: 0.65rem 0.75rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 0;
 }
 .sta-state-card .lbl {
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     color: #6E6E73;
-    margin-bottom: 0.15rem;
+    margin-bottom: 0.2rem;
 }
 .sta-state-card .val {
-    font-size: 1.05rem;
+    font-size: 1.12rem;
     font-weight: 600;
     color: #1D1D1F;
     letter-spacing: -0.02em;
 }
 .sta-heat-grid {
+    flex: 1;
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 0.45rem;
-    margin-top: 0.55rem;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    gap: 0.5rem;
+    min-height: 0;
 }
 .sta-heat-card {
     background: #FFFFFF;
-    border-radius: 10px;
-    padding: 0.45rem 0.55rem;
+    border-radius: 12px;
+    padding: 0.55rem 0.7rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 0;
 }
-.sta-heat-card .lbl { font-size: 0.68rem; color: #6E6E73; }
-.sta-heat-card .val { font-size: 0.92rem; font-weight: 600; color: #1D1D1F; }
+.sta-heat-card .lbl { font-size: 0.7rem; color: #6E6E73; margin-bottom: 0.15rem; }
+.sta-heat-card .val { font-size: 1.05rem; font-weight: 600; color: #1D1D1F; letter-spacing: -0.02em; }
+.sta-heat-card.sta-heat-net {
+    background: #1D1D1F;
+}
+.sta-heat-card.sta-heat-net .lbl { color: #A1A1A6; }
+.sta-heat-card.sta-heat-net .val { color: #FFFFFF; }
 div[data-testid="stSidebar"] .stButton button[kind="primary"] {
     background: #1D1D1F !important;
     border: none !important;
@@ -200,14 +268,23 @@ TERM_HELP = {
         "sunlight under this model."
     ),
     "mode": (
-        "Satellite Thermal Simulation runs one case. Compare Heat Sources runs "
-        "the same spacecraft three times: sunlight only, then +Earth infrared, "
-        "then +Earth infrared and albedo."
+        "Satellite Thermal Simulation runs one configured case. Compare Heat "
+        "Sources compares environmental heating: sunlight only, then +Earth "
+        "infrared, then +Earth infrared and albedo. Constant internal heating "
+        "and radiative cooling are included in every case."
     ),
     "internal": (
-        "Constant onboard equipment dissipation (W). Adds continuous heating in "
-        "the energy balance. This simplified model does not vary power with "
-        "eclipse or duty cycle."
+        "Heat generated by onboard electronics and equipment. The default is "
+        "5 W for the reference spacecraft, but you can change it to investigate "
+        "different operating conditions. The default is illustrative, not a "
+        "measured or mission-validated value. Internal heating is assumed "
+        "constant throughout the simulation."
+    ),
+    "inspect_case": (
+        "Select which heating case to examine in detail. All three temperature "
+        "histories remain on the graph; this selection controls the spacecraft "
+        "temperature, orbital view, selected-time values, and heat-flow analysis "
+        "shown below."
     ),
     "mass": "Spacecraft mass (kg). With specific heat, sets thermal capacitance m·cp.",
     "cp": (
@@ -281,6 +358,15 @@ def _init_state() -> None:
         )
 
 
+def _prepare_new_run() -> None:
+    """Reset inspection to Case A before widgets render (Streamlit callback)."""
+    run_id = int(st.session_state.get("inspect_run_id", 0)) + 1
+    st.session_state.inspect_run_id = run_id
+    st.session_state.inspect_case_name = ENV_CASE_A
+    st.session_state[f"inspect_case_{run_id}"] = ENV_CASE_A
+    st.session_state.sample_index = 0
+
+
 def _apply_defaults() -> None:
     defaults = default_gui_request()
     for field, value in defaults.__dict__.items():
@@ -298,6 +384,7 @@ def _apply_defaults() -> None:
     )
     st.session_state.gui_mode = "single"
     st.session_state.gui_attitude_mode = AttitudeMode.FIXED_INERTIAL.value
+    st.session_state.inspect_case_name = ENV_CASE_A
 
 
 def _apply_enhanced_cube() -> None:
@@ -434,10 +521,20 @@ with st.sidebar:
         help=TERM_HELP["mode"],
     )
     if mode == "single":
-        st.caption("One spacecraft and orbit — temperature, heat flows, and 3D view.")
+        st.markdown(
+            '<p class="sta-sidebar-note">One spacecraft and orbit — temperature, '
+            "heat flows, and 3D view.</p>",
+            unsafe_allow_html=True,
+        )
     else:
-        st.caption(
-            "Same spacecraft three times: sunlight only → +Earth IR → +Earth IR & albedo."
+        st.markdown(
+            '<p class="sta-sidebar-note">Compare how environmental heat sources '
+            "affect spacecraft temperature. The same spacecraft is simulated under "
+            "three conditions: direct sunlight only, sunlight plus Earth's infrared "
+            "radiation, and both sources plus reflected sunlight (albedo). Constant "
+            "internal heating and radiative cooling are included in all three "
+            "cases.</p>",
+            unsafe_allow_html=True,
         )
     st.number_input(
         "Number of orbits",
@@ -448,7 +545,7 @@ with st.sidebar:
         help="How many full revolutions around Earth to simulate.",
     )
     st.number_input(
-        "Internal power (W)",
+        "Internal heat dissipation (W)",
         min_value=0.0,
         max_value=500.0,
         step=0.5,
@@ -456,7 +553,12 @@ with st.sidebar:
         help=TERM_HELP["internal"],
     )
 
-    run_clicked = st.button("Run Simulation", type="primary", use_container_width=True)
+    run_clicked = st.button(
+        "Run Simulation",
+        type="primary",
+        use_container_width=True,
+        on_click=_prepare_new_run,
+    )
     st.button("Reset to defaults", use_container_width=True, on_click=_apply_defaults)
 
     with st.expander("Advanced settings", expanded=False):
@@ -685,7 +787,10 @@ if run_clicked:
             ),
         )
         st.session_state.sample_index = 0
+        # Prefer Case A after every Compare Heat Sources solve (callback also sets this).
         st.session_state.inspect_case_name = default_inspect_curve_name(study)
+        run_id = int(st.session_state.get("inspect_run_id", 0))
+        st.session_state[f"inspect_case_{run_id}"] = default_inspect_curve_name(study)
         st.success("Simulation complete.")
     except Exception as exc:  # noqa: BLE001
         st.error(f"Simulation failed: {exc}")
@@ -736,15 +841,37 @@ default_name = default_inspect_curve_name(study)
 if st.session_state.get("inspect_case_name") not in source_names:
     st.session_state.inspect_case_name = default_name
 if study.mode == "environment_compare":
-    inspect_name = st.selectbox(
-        "Inspection case",
+    _inspect_display = {
+        ENV_CASE_A: "A — No Earth Heating",
+        ENV_CASE_B: "B — With Earth Infrared",
+        ENV_CASE_C: "C — With Earth Infrared and Albedo",
+    }
+    # Remount per run so Streamlit cannot keep a prior Case C selection.
+    inspect_widget_key = f"inspect_case_{int(st.session_state.get('inspect_run_id', 0))}"
+    if inspect_widget_key not in st.session_state:
+        st.session_state[inspect_widget_key] = default_name
+    inspect_name = st.segmented_control(
+        "Inspect results for",
         options=source_names,
-        index=source_names.index(st.session_state.inspect_case_name),
-        help="Case used for the time slider, heat-flow panel, 3D view, and PDF snapshot.",
+        key=inspect_widget_key,
+        default=default_name,
+        required=True,
+        format_func=lambda name: _inspect_display.get(name, name),
+        help=TERM_HELP["inspect_case"],
+        width="stretch",
+        wrap=True,
     )
+    if inspect_name is None:
+        inspect_name = default_name
     st.session_state.inspect_case_name = inspect_name
+    st.caption(
+        "All three temperature curves stay on the graph. This choice updates the "
+        "detailed temperature, orbit view, selected-time values, and heat-flow "
+        "analysis below."
+    )
 else:
     inspect_name = default_name
+    st.session_state.inspect_case_name = inspect_name
 
 viz_curve = resolve_inspect_curve(curves, inspect_name, default_name)
 n_samples = len(viz_curve.result.time_s)
@@ -832,7 +959,7 @@ with right:
     st.markdown(
         f"""
 <div class="sta-state-panel">
-  <div>
+  <div class="sta-panel-block sta-panel-status">
     <h5>At selected time</h5>
     <div class="sta-state-grid">
       <div class="sta-state-card"><div class="lbl">Temperature</div>
@@ -844,9 +971,9 @@ with right:
       <div class="sta-state-card"><div class="lbl">Orbit</div>
         <div class="val">{t_s / period_s + 1.0:.2f}</div></div>
     </div>
-    <div style="margin-top:0.85rem;font-size:0.78rem;font-weight:600;color:#6E6E73;">
-      Heating and cooling (W)
-    </div>
+  </div>
+  <div class="sta-panel-block sta-panel-heat">
+    <div class="sta-panel-heading">Heating and cooling (W)</div>
     <div class="sta-heat-grid">
       <div class="sta-heat-card"><div class="lbl">Sunlight</div>
         <div class="val">{snap.q_solar_w:.2f}</div></div>
@@ -858,7 +985,7 @@ with right:
         <div class="val">{snap.q_internal_w:.2f}</div></div>
       <div class="sta-heat-card"><div class="lbl">Cooling</div>
         <div class="val">{snap.q_radiated_w:.2f}</div></div>
-      <div class="sta-heat-card"><div class="lbl">Net</div>
+      <div class="sta-heat-card sta-heat-net"><div class="lbl">Net</div>
         <div class="val">{snap.q_net_w:.2f}</div></div>
     </div>
   </div>

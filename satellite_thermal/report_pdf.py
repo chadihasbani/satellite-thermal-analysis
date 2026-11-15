@@ -105,8 +105,8 @@ def default_report_meta(
 def power_schedule_detail_rows(request: GuiRunRequest) -> list[tuple[str, str]]:
     """Reproducible internal-power parameters from a frozen request."""
     return [
-        ("Internal power schedule", "constant"),
-        ("Constant internal power", f"{request.internal_heat_w:.3g} W"),
+        ("Internal heat schedule", "constant"),
+        ("Internal heat dissipation", f"{request.internal_heat_w:.3g} W"),
     ]
 
 
@@ -125,7 +125,7 @@ def _mode_cover_rows(
         rows.append(("Reported case", viz_curve.name))
     elif study.mode == "environment_compare":
         rows.append(("Compared cases", " → ".join(ENV_CASE_NAMES)))
-        rows.append(("Inspection snapshot case", viz_curve.name))
+        rows.append(("Inspected case", viz_curve.name))
     else:
         rows.append(("Inspection snapshot case", viz_curve.name))
     return rows
@@ -483,12 +483,12 @@ def build_engineering_report_pdf(
             kv_table(
                 [
                     (
-                        "Inspection case",
+                        "Inspected case",
                         viz_curve.name,
                     ),
-                    ("Predicted final (inspect case)", f"{inspect_metrics['final_c']:.2f} °C"),
-                    ("Predicted minimum (inspect case)", f"{inspect_metrics['minimum_c']:.2f} °C"),
-                    ("Predicted maximum (inspect case)", f"{inspect_metrics['maximum_c']:.2f} °C"),
+                    ("Predicted final (inspected case)", f"{inspect_metrics['final_c']:.2f} °C"),
+                    ("Predicted minimum (inspected case)", f"{inspect_metrics['minimum_c']:.2f} °C"),
+                    ("Predicted maximum (inspected case)", f"{inspect_metrics['maximum_c']:.2f} °C"),
                     (
                         "At selected sample",
                         (

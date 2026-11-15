@@ -49,7 +49,9 @@ an engineering PDF for the completed run.
 | Mode | Purpose |
 | --- | --- |
 | Satellite Thermal Simulation | One configured run (default) |
-| Compare Heat Sources | Same spacecraft: sunlight only → +Earth IR → +albedo |
+| Compare Heat Sources | Same spacecraft under sunlight only, +Earth IR, then +albedo (constant internal heating in all cases) |
+
+![Compare Heat Sources: sunlight only, +Earth IR, and +albedo](docs/images/thermal-comparison.png)
 
 ---
 

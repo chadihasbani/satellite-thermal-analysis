@@ -441,7 +441,13 @@ def environment_comparison_interpretation(curves: tuple[NamedResult, ...]) -> st
 
 
 def default_inspect_curve_name(study: CompletedGuiStudy) -> str:
-    """Default case used for 3D / heat-flow inspection after a solve."""
+    """Default case used for 3D / heat-flow inspection after a solve.
+
+    Compare Heat Sources starts on Case A (no Earth heating). Single-mode
+    studies use the sole primary curve.
+    """
+    if study.mode == "environment_compare":
+        return ENV_CASE_A
     return study.primary.name
 
 
@@ -456,7 +462,7 @@ def resolve_inspect_curve(
         return by_name[selected_name]
     if default_name in by_name:
         return by_name[default_name]
-    return curves[-1]
+    return curves[0]
 
 
 def run_named_simulation(name: str, request: GuiRunRequest) -> NamedResult:
@@ -597,15 +603,16 @@ def make_gui_temperature_figure(
             edgecolors="#FFFFFF",
             linewidths=1.0,
         )
-    axis.set_xlabel("Time (minutes)")
-    axis.set_ylabel("Temperature (°C)")
-    axis.set_title(title, pad=12)
-    axis.grid(True, axis="y", zorder=1)
+    axis.set_xlabel("Time (minutes)", fontsize=11)
+    axis.set_ylabel("Temperature (°C)", fontsize=11)
+    axis.set_title(title, pad=12, fontsize=13)
+    axis.tick_params(axis="both", labelsize=10)
+    axis.grid(True, axis="y", zorder=1, alpha=0.55)
     axis.grid(False, axis="x")
     handles = list(axis.lines) + [
         Patch(facecolor="#D2D2D7", edgecolor="none", alpha=0.9, label="Eclipse")
     ]
-    axis.legend(handles=handles, loc="upper right", fontsize=10)
+    axis.legend(handles=handles, loc="upper right", fontsize=9, frameon=False)
     axis.text(
         0.0,
         -0.18,
@@ -684,10 +691,11 @@ def make_comparison_temperature_figure(
             linewidths=1.0,
         )
 
-    axis.set_xlabel("Time (minutes)")
-    axis.set_ylabel("Temperature (°C)")
-    axis.set_title(title, pad=12)
-    axis.grid(True, axis="y", zorder=1)
+    axis.set_xlabel("Time (minutes)", fontsize=11)
+    axis.set_ylabel("Temperature (°C)", fontsize=11)
+    axis.set_title(title, pad=12, fontsize=13)
+    axis.tick_params(axis="both", labelsize=10)
+    axis.grid(True, axis="y", zorder=1, alpha=0.55)
     axis.grid(False, axis="x")
     note = (
         "Grey bands = eclipse (Earth blocks direct sunlight). "
@@ -707,7 +715,7 @@ def make_comparison_temperature_figure(
             label=f"Eclipse ({shade_source.name})",
         )
     ]
-    axis.legend(handles=handles, loc="best", fontsize=8, frameon=False)
+    axis.legend(handles=handles, loc="best", fontsize=9, frameon=False)
     figure.tight_layout()
     return figure
 

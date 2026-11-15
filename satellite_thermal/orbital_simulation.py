@@ -179,11 +179,7 @@ def simulate_orbital_eclipse(
     Internal power defaults to a constant schedule equal to
     ``parameters.internal_heat_w``. When ``power_schedule`` is supplied it is
     evaluated at the start of each Euler step together with the eclipse flag.
-
-    For ``periodic_high`` and ``custom_intervals`` schedules, each candidate
-    step is shortened if it would cross a known power discontinuity so that
-    short off-grid pulses are not skipped. ``eclipse_reduced`` still uses the
-    sampled eclipse flag without separate eclipse-boundary events.
+    This simplified simulator supports constant internal power only.
 
     When ``max_samples`` is set, exceeding it raises ``ValueError`` instead of
     returning a truncated history that could be mistaken for a complete run.
