@@ -6,10 +6,14 @@ inspection sample. Does not re-solve the thermal equations.
 
 from __future__ import annotations
 
+import logging
 import math
+import os
+import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
+from pathlib import Path
 
 from satellite_thermal.gui_support import (
     ENV_CASE_NAMES,
@@ -73,6 +77,23 @@ ATTITUDE_LABELS = {
     "sun_pointing": "Sun-facing (Sun-pointing)",
 }
 
+ORBITAL_IMAGE_UNAVAILABLE_NOTE = (
+    "The 3D orbital snapshot could not be included because the image "
+    "renderer was unavailable."
+)
+
+# Typical Debian / Streamlit Community Cloud paths from packages.txt `chromium`.
+_SYSTEM_CHROME_CANDIDATES = (
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/lib/chromium/chromium",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+)
+
+_logger = logging.getLogger(__name__)
+_kaleido_browser_configured = False
+
 
 @dataclass(frozen=True)
 class ReportMeta:
@@ -82,6 +103,15 @@ class ReportMeta:
     configuration_label: str
     scenario_id: str
     scenario_label: str
+
+
+@dataclass(frozen=True)
+class EngineeringReportPdf:
+    """PDF bytes plus optional orbital-image export status."""
+
+    pdf_bytes: bytes
+    orbital_snapshot_included: bool
+    orbital_snapshot_error: str | None = None
 
 
 def default_report_meta(
@@ -220,17 +250,69 @@ def _mode_cover_rows(
     return rows
 
 
+def _discover_system_chrome_path() -> str | None:
+    """Return a usable Chromium/Chrome executable path if one is installed."""
+    env_path = os.environ.get("BROWSER_PATH") or os.environ.get("CHROME_PATH")
+    if env_path and Path(env_path).is_file():
+        return env_path
+    for candidate in _SYSTEM_CHROME_CANDIDATES:
+        if Path(candidate).is_file():
+            return candidate
+    for name in ("chromium", "chromium-browser", "google-chrome-stable", "google-chrome"):
+        found = shutil.which(name)
+        if found and Path(found).is_file():
+            return found
+    return None
+
+
+def ensure_kaleido_browser_configured() -> str | None:
+    """Point Kaleido at a system browser once (no per-PDF Chrome download).
+
+    Prefer the Streamlit Community Cloud / apt Chromium installed via
+    ``packages.txt``. Returns the configured executable path, or ``None`` if
+    no system browser was found (Kaleido may still succeed via its own cache).
+    """
+    global _kaleido_browser_configured
+    if _kaleido_browser_configured:
+        existing = os.environ.get("BROWSER_PATH")
+        return existing if existing and Path(existing).is_file() else None
+
+    path = _discover_system_chrome_path()
+    if path:
+        os.environ["BROWSER_PATH"] = path
+        _logger.info("Kaleido BROWSER_PATH set to system browser: %s", path)
+    else:
+        _logger.info(
+            "No system Chromium/Chrome found for Kaleido; relying on Kaleido defaults."
+        )
+    _kaleido_browser_configured = True
+    return path
+
+
 def _plotly_figure_to_png_bytes(figure, *, width: int = 900, height: int = 700) -> bytes:
-    """Export a Plotly figure to PNG bytes (requires kaleido)."""
+    """Export a Plotly figure to PNG bytes (requires kaleido + browser)."""
+    ensure_kaleido_browser_configured()
     try:
         return figure.to_image(format="png", width=width, height=height, scale=2)
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(
             "Could not export the 3D orbital snapshot to an image. "
             "Install the kaleido package (see requirements.txt) and ensure a "
-            "compatible Chrome/Chromium is available for Kaleido. "
+            "compatible Chrome/Chromium is available for Kaleido "
+            "(Streamlit Community Cloud: packages.txt entry `chromium`). "
             f"Details: {exc}"
         ) from exc
+
+
+def export_orbital_snapshot_png(
+    figure, *, width: int = 900, height: int = 700
+) -> tuple[bytes | None, str | None]:
+    """Try Plotly/Kaleido orbital export; return (png_bytes, error_message)."""
+    try:
+        return _plotly_figure_to_png_bytes(figure, width=width, height=height), None
+    except Exception as exc:  # noqa: BLE001
+        _logger.exception("Orbital snapshot image export failed")
+        return None, str(exc)
 
 
 def _temperature_figure_png(study: CompletedGuiStudy, viz_curve: NamedResult, sample_index: int) -> bytes:
@@ -278,11 +360,14 @@ def build_engineering_report_pdf(
     viz_curve: NamedResult,
     sample_index: int,
     meta: ReportMeta,
-) -> bytes:
+) -> EngineeringReportPdf:
     """Generate a multi-page engineering PDF for one completed study.
 
     Uses only the completed study curves and the selected inspection sample.
     Does not read live Streamlit sidebar widgets.
+
+    Orbital-image export failures are non-fatal: the PDF is still produced with
+    a disclosed missing-visualization note. Other failures still raise.
     """
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
@@ -355,7 +440,7 @@ def build_engineering_report_pdf(
         body_height_m=request.body_height_m,
         thermal_model=request.thermal_model,
     )
-    orbit_png = _plotly_figure_to_png_bytes(fig3d)
+    orbit_png, orbit_export_error = export_orbital_snapshot_png(fig3d)
 
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -819,22 +904,39 @@ def build_engineering_report_pdf(
         )
     )
 
-    # --- 3D snapshot ---
+    # --- 3D snapshot (optional image; selected-time facts always included) ---
     story.append(section("6. 3D orbital snapshot"))
-    story.append(image_flow(orbit_png, width_mm=150, height_mm=108))
     orbit_number = snap.time_s / period_s + 1.0
-    story.append(
-        p(
-            f"Figure: Orbital visualization at t = {snap.time_s / 60.0:.2f} min "
-            f"(orbit {orbit_number:.2f}), T = {snap.temperature_c:.2f} °C, "
-            f"{'eclipsed' if snap.in_eclipse else 'sunlit'}, "
-            f"β = {request.beta_deg:.1f}°, "
-            f"orientation = {ATTITUDE_LABELS.get(request.attitude_mode, request.attitude_mode)}. "
-            "The craft is enlarged for readability; the view is illustrative and not to scale. "
-            "Earth tip (~23°) is visual only.",
-            "Caption",
-        )
+    snapshot_facts = (
+        f"Selected sample: t = {snap.time_s / 60.0:.2f} min "
+        f"(orbit {orbit_number:.2f}), "
+        f"predicted spacecraft temperature = {snap.temperature_c:.2f} °C, "
+        f"{'orbital eclipse' if snap.in_eclipse else 'sunlit'}, "
+        f"β = {request.beta_deg:.1f}°, "
+        f"spacecraft orientation = "
+        f"{ATTITUDE_LABELS.get(request.attitude_mode, request.attitude_mode)}."
     )
+    if orbit_png is not None:
+        story.append(image_flow(orbit_png, width_mm=150, height_mm=108))
+        story.append(
+            p(
+                "Figure: Orbital visualization at the selected sample. "
+                + snapshot_facts
+                + " The craft is enlarged for readability; the view is illustrative "
+                "and not to scale. Earth tip (~23°) is visual only.",
+                "Caption",
+            )
+        )
+    else:
+        story.append(p(f"<b>{ORBITAL_IMAGE_UNAVAILABLE_NOTE}</b>"))
+        story.append(p(snapshot_facts))
+        if orbit_export_error:
+            story.append(
+                p(
+                    f"Technical detail (for troubleshooting): {orbit_export_error}",
+                    "Caption",
+                )
+            )
 
     # --- Heat flow ---
     story.append(
@@ -1062,4 +1164,8 @@ def build_engineering_report_pdf(
         canvas.restoreState()
 
     doc.build(story, onFirstPage=_on_page, onLaterPages=_on_page)
-    return buffer.getvalue()
+    return EngineeringReportPdf(
+        pdf_bytes=buffer.getvalue(),
+        orbital_snapshot_included=orbit_png is not None,
+        orbital_snapshot_error=orbit_export_error,
+    )
