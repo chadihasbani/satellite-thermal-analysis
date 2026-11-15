@@ -13,14 +13,10 @@ from satellite_thermal.albedo import AlbedoParameters
 from satellite_thermal.attitude import AttitudeMode, parse_attitude_mode
 from satellite_thermal.earth_infrared import EarthInfraredParameters
 from satellite_thermal.internal_power import (
-    ILLUSTRATIVE_HIGH_POWER_W,
     ILLUSTRATIVE_NOMINAL_W,
-    ILLUSTRATIVE_STANDBY_W,
     InternalPowerSchedule,
-    OperatingModePowers,
-    PowerInterval,
     PowerScheduleKind,
-    parse_power_schedule_kind,
+    constant_power_schedule,
 )
 from satellite_thermal.orbit import CircularOrbit, orbital_period_s
 from satellite_thermal.orbital_simulation import (
@@ -39,20 +35,10 @@ from satellite_thermal.spacecraft_configurations import (
     configuration_overlay_fields,
     parse_spacecraft_configuration_id,
 )
-from satellite_thermal.thermal_scenarios import (
-    SCENARIO_CASE_COLD,
-    SCENARIO_CASE_HOT,
-    SCENARIO_CASE_NOMINAL,
-    ThermalScenarioId,
-    build_scenario_definition,
-    parse_thermal_scenario_id,
-    scenario_overlay_fields,
-)
 from satellite_thermal.units import kelvin_to_celsius
 from satellite_thermal.validation import require_positive
 
 # Soft cap so the GUI stays responsive for interactive runs.
-# Includes nominal Euler samples plus scheduled power-event splits.
 MAX_GUI_SAMPLES = 250_000
 ABSOLUTE_ZERO_C = -273.15
 
@@ -85,13 +71,6 @@ class GuiRunRequest:
     body_length_m: float = 0.1
     body_width_m: float = 0.1
     body_height_m: float = 0.1
-    power_schedule_kind: str = PowerScheduleKind.CONSTANT.value
-    standby_power_w: float = ILLUSTRATIVE_STANDBY_W
-    nominal_power_w: float = ILLUSTRATIVE_NOMINAL_W
-    high_power_w: float = ILLUSTRATIVE_HIGH_POWER_W
-    periodic_period_s: float = 600.0
-    periodic_high_duration_s: float = 120.0
-    custom_intervals_text: str = ""
 
 
 def default_gui_request() -> GuiRunRequest:
@@ -106,7 +85,7 @@ def default_gui_request() -> GuiRunRequest:
         radiating_area_m2=0.06,
         earth_facing_area_m2=0.01,
         albedo_area_m2=0.01,
-        internal_heat_w=5.0,
+        internal_heat_w=ILLUSTRATIVE_NOMINAL_W,
         solar_flux_w_per_m2=1361.0,
         earth_olr_w_per_m2=240.0,
         earth_bond_albedo=0.30,
@@ -121,13 +100,6 @@ def default_gui_request() -> GuiRunRequest:
         body_length_m=0.1,
         body_width_m=0.1,
         body_height_m=0.1,
-        power_schedule_kind=PowerScheduleKind.CONSTANT.value,
-        standby_power_w=ILLUSTRATIVE_STANDBY_W,
-        nominal_power_w=ILLUSTRATIVE_NOMINAL_W,
-        high_power_w=ILLUSTRATIVE_HIGH_POWER_W,
-        periodic_period_s=600.0,
-        periodic_high_duration_s=120.0,
-        custom_intervals_text="",
     )
 
 
@@ -142,112 +114,19 @@ def geometry_from_request(request: GuiRunRequest) -> RectangularBusGeometry:
     ).validated()
 
 
-def parse_custom_intervals_text(text: str) -> tuple[PowerInterval, ...]:
-    """Parse ``start,end,power`` rows separated by ``;`` or newlines."""
-    raw = str(text).strip()
-    if not raw:
-        return ()
-    chunks = []
-    for part in raw.replace("\n", ";").split(";"):
-        piece = part.strip()
-        if piece:
-            chunks.append(piece)
-    intervals: list[PowerInterval] = []
-    for index, chunk in enumerate(chunks):
-        fields = [item.strip() for item in chunk.split(",")]
-        if len(fields) != 3:
-            raise ValueError(
-                "Each custom interval must be 'start_s,end_s,power_w'. "
-                f"Bad entry #{index + 1}: {chunk!r}."
-            )
-        intervals.append(
-            PowerInterval(
-                start_s=float(fields[0]),
-                end_s=float(fields[1]),
-                power_w=float(fields[2]),
-                label=f"interval_{index + 1}",
-            )
-        )
-    return tuple(intervals)
-
-
 def power_schedule_from_request(request: GuiRunRequest) -> InternalPowerSchedule:
-    """Build the validated internal-power schedule from GUI fields."""
-    kind = parse_power_schedule_kind(request.power_schedule_kind)
-    mode_powers = OperatingModePowers(
-        standby_w=request.standby_power_w,
-        nominal_w=request.nominal_power_w,
-        high_power_w=request.high_power_w,
-    ).validated()
-    if kind is PowerScheduleKind.CONSTANT:
-        return InternalPowerSchedule(
-            kind=kind.value,
-            constant_power_w=request.internal_heat_w,
-        ).validated()
-    if kind is PowerScheduleKind.ECLIPSE_REDUCED:
-        return InternalPowerSchedule(
-            kind=kind.value,
-            sunlight_power_w=mode_powers.nominal_w,
-            eclipse_power_w=mode_powers.standby_w,
-            constant_power_w=request.internal_heat_w,
-        ).validated()
-    if kind is PowerScheduleKind.PERIODIC_HIGH:
-        return InternalPowerSchedule(
-            kind=kind.value,
-            base_power_w=mode_powers.nominal_w,
-            high_power_w=mode_powers.high_power_w,
-            period_s=request.periodic_period_s,
-            high_duration_s=request.periodic_high_duration_s,
-            constant_power_w=request.internal_heat_w,
-        ).validated()
-    return InternalPowerSchedule(
-        kind=PowerScheduleKind.CUSTOM_INTERVALS.value,
-        constant_power_w=request.internal_heat_w,
-        intervals=parse_custom_intervals_text(request.custom_intervals_text),
-    ).validated()
-
-
-def count_scheduled_power_events(
-    schedule: InternalPowerSchedule,
-    duration_s: float,
-) -> int:
-    """Upper-bound count of schedule discontinuities in ``(0, duration_s)``.
-
-    Used for GUI sample estimation. ``constant`` and ``eclipse_reduced``
-    contribute zero schedule events (eclipse edges remain step-sampled).
-    """
-    settings = schedule.validated()
-    duration = require_positive("duration_s", duration_s)
-    kind = parse_power_schedule_kind(settings.kind)
-    if kind in (PowerScheduleKind.CONSTANT, PowerScheduleKind.ECLIPSE_REDUCED):
-        return 0
-    if kind is PowerScheduleKind.PERIODIC_HIGH:
-        if settings.high_duration_s <= 0.0 or settings.high_duration_s >= settings.period_s:
-            return 0
-        # At most two events per period (high start and high end).
-        periods = math.ceil(duration / settings.period_s)
-        return int(2 * periods)
-    edges: set[float] = set()
-    for interval in settings.intervals:
-        if 0.0 < interval.start_s < duration:
-            edges.add(interval.start_s)
-        if 0.0 < interval.end_s < duration:
-            edges.add(interval.end_s)
-    return len(edges)
+    """Build the constant internal-power schedule from GUI fields."""
+    return constant_power_schedule(request.internal_heat_w)
 
 
 def estimate_gui_sample_count(request: GuiRunRequest) -> int:
-    """Conservative sample-count estimate including power-event splits."""
+    """Conservative sample-count estimate for the interactive GUI."""
     orbit = CircularOrbit(
         altitude_m=request.altitude_km * 1000.0,
         beta_rad=math.radians(request.beta_deg),
     ).validated()
     duration_s = request.orbit_count * orbital_period_s(orbit)
-    # Nominal Euler samples, plus a small margin for the final instant.
-    base_samples = int(math.floor(duration_s / request.time_step_s)) + 2
-    schedule = power_schedule_from_request(request)
-    event_samples = count_scheduled_power_events(schedule, duration_s)
-    return base_samples + event_samples
+    return int(math.floor(duration_s / request.time_step_s)) + 2
 
 
 def build_model_inputs(request: GuiRunRequest) -> tuple[
@@ -342,25 +221,14 @@ def validate_gui_request(request: GuiRunRequest) -> GuiRunRequest:
     for dim_name in ("body_length_m", "body_width_m", "body_height_m"):
         if getattr(request, dim_name) <= 0.0:
             raise ValueError(f"{dim_name} must be greater than 0.")
-    for power_name in ("standby_power_w", "nominal_power_w", "high_power_w"):
-        if getattr(request, power_name) < 0.0:
-            raise ValueError(f"{power_name} must be >= 0.")
-    if request.periodic_period_s <= 0.0:
-        raise ValueError("periodic_period_s must be greater than 0.")
-    if request.periodic_high_duration_s < 0.0:
-        raise ValueError("periodic_high_duration_s must be >= 0.")
-    # Validate schedule construction (overlaps, kinds, etc.).
     power_schedule_from_request(request)
 
-    # Include scheduled power-event splits in the interactive sample budget.
     estimated_samples = estimate_gui_sample_count(request)
     if estimated_samples > MAX_GUI_SAMPLES:
         raise ValueError(
             "Requested run is too large for interactive use "
-            f"(~{estimated_samples:,} samples including power-event splits; "
-            f"limit {MAX_GUI_SAMPLES:,}). "
-            "Increase the time step, reduce the number of orbits, lengthen the "
-            "periodic period, or reduce custom power intervals. "
+            f"(~{estimated_samples:,} samples; limit {MAX_GUI_SAMPLES:,}). "
+            "Increase the time step or reduce the number of orbits. "
             "The GUI does not silently truncate incomplete runs."
         )
     return request
@@ -378,13 +246,11 @@ def clamp_sample_index(n_samples: int, index: int) -> int:
 def request_fingerprint(
     mode: str,
     request: GuiRunRequest,
-    scenario_id: str = ThermalScenarioId.CUSTOM.value,
     configuration_id: str = SpacecraftConfigurationId.CUSTOM.value,
 ) -> tuple:
     """Hashable snapshot of the inputs that produced a displayed study."""
     return (
         mode,
-        parse_thermal_scenario_id(scenario_id).value,
         parse_spacecraft_configuration_id(configuration_id).value,
         tuple(sorted(asdict(request).items())),
     )
@@ -394,12 +260,7 @@ def apply_spacecraft_configuration(
     request: GuiRunRequest,
     configuration_id: str | SpacecraftConfigurationId,
 ) -> GuiRunRequest:
-    """Apply a spacecraft preset overlay; ``custom`` leaves the request unchanged.
-
-    Overrides geometry, mass, effective cp, optics, thermal-model kind, and the
-    effective-area fields owned by the preset. Orbit, scenarios, attitude, and
-    power schedules are preserved.
-    """
+    """Apply a spacecraft preset overlay; ``custom`` leaves the request unchanged."""
     kind = parse_spacecraft_configuration_id(configuration_id)
     if kind is SpacecraftConfigurationId.CUSTOM:
         return request
@@ -407,23 +268,6 @@ def apply_spacecraft_configuration(
     return GuiRunRequest(
         **{**request.__dict__, **configuration_overlay_fields(definition)}
     )
-
-
-def apply_thermal_scenario(
-    request: GuiRunRequest,
-    scenario_id: str | ThermalScenarioId,
-) -> GuiRunRequest:
-    """Apply Nominal/Hot/Cold overlays; ``custom`` leaves the request unchanged.
-
-    Overrides only environmental fluxes, beta, planetary-load flags, and the
-    constant internal-power fields owned by the preset. Geometry, coatings,
-    altitude, step size, thermal model, and attitude are preserved.
-    """
-    kind = parse_thermal_scenario_id(scenario_id)
-    if kind is ThermalScenarioId.CUSTOM:
-        return request
-    definition = build_scenario_definition(kind, altitude_km=request.altitude_km)
-    return GuiRunRequest(**{**request.__dict__, **scenario_overlay_fields(definition)})
 
 
 def run_gui_simulation(request: GuiRunRequest) -> OrbitalThermalResult:
@@ -486,88 +330,17 @@ class CompletedGuiStudy:
     changed_fields: tuple[str, ...] = ()
 
 
-# Stable display names for environmental-heating cases (Mode 3).
 ENV_CASE_A = "A - No Earth Heating"
 ENV_CASE_B = "B - With Earth Infrared"
 ENV_CASE_C = "C - With Earth Infrared and Albedo"
 ENV_CASE_NAMES = (ENV_CASE_A, ENV_CASE_B, ENV_CASE_C)
-
-REF_CASE_NAME = "Reference"
-MOD_CASE_NAME = "Modified"
 SINGLE_CASE_NAME = "Single simulation"
-SCENARIO_COMPARE_MODE = "scenario_compare"
-
-_PARAMETER_LABELS = {
-    "mass_kg": "Mass (kg)",
-    "specific_heat_j_per_kg_k": "Specific heat cp (J/(kg·K))",
-    "initial_temperature_c": "Initial temperature (°C)",
-    "absorptivity": "Solar absorptivity α",
-    "emissivity": "Infrared emissivity ε",
-    "projected_area_m2": "Projected solar area (m²)",
-    "radiating_area_m2": "Radiating area (m²)",
-    "earth_facing_area_m2": "Earth-facing area (m²)",
-    "albedo_area_m2": "Albedo area (m²)",
-    "internal_heat_w": "Internal power (W)",
-    "solar_flux_w_per_m2": "Solar flux S (W/m²)",
-    "earth_olr_w_per_m2": "Earth OLR E_olr (W/m²)",
-    "earth_bond_albedo": "Earth Bond albedo a",
-    "altitude_km": "Altitude (km)",
-    "beta_deg": "Orbital beta angle (°)",
-    "orbit_count": "Number of orbits",
-    "time_step_s": "Time step (s)",
-    "include_earth_infrared": "Include Earth IR",
-    "include_albedo": "Include albedo",
-    "thermal_model": "Thermal model",
-    "attitude_mode": "Attitude mode",
-    "body_length_m": "Body length (m)",
-    "body_width_m": "Body width (m)",
-    "body_height_m": "Body height (m)",
-    "power_schedule_kind": "Internal power schedule",
-    "standby_power_w": "Standby power (W)",
-    "nominal_power_w": "Nominal power (W)",
-    "high_power_w": "High power (W)",
-    "periodic_period_s": "Periodic high period (s)",
-    "periodic_high_duration_s": "Periodic high duration (s)",
-    "custom_intervals_text": "Custom power intervals",
-}
 
 _ENV_HEATING_LABELS = {
     ENV_CASE_A: "No Earth heating",
     ENV_CASE_B: "Earth infrared included",
     ENV_CASE_C: "Earth infrared + albedo",
 }
-
-
-def changed_parameter_labels(
-    baseline: GuiRunRequest,
-    modified: GuiRunRequest,
-) -> tuple[str, ...]:
-    """Human-readable list of fields that differ from baseline."""
-    labels = []
-    for field, label in _PARAMETER_LABELS.items():
-        if getattr(baseline, field) != getattr(modified, field):
-            labels.append(label)
-    return tuple(labels)
-
-
-def changed_parameter_rows(
-    baseline: GuiRunRequest,
-    modified: GuiRunRequest,
-) -> list[dict[str, object]]:
-    """Rows for a reference-vs-modified comparison table."""
-    rows: list[dict[str, object]] = []
-    for field, label in _PARAMETER_LABELS.items():
-        base_value = getattr(baseline, field)
-        mod_value = getattr(modified, field)
-        if base_value != mod_value:
-            rows.append(
-                {
-                    "Parameter": label,
-                    "Reference": base_value,
-                    "Modified": mod_value,
-                }
-            )
-    return rows
 
 
 def comparison_metrics_rows(curves: tuple[NamedResult, ...]) -> list[dict[str, object]]:
@@ -669,10 +442,6 @@ def environment_comparison_interpretation(curves: tuple[NamedResult, ...]) -> st
 
 def default_inspect_curve_name(study: CompletedGuiStudy) -> str:
     """Default case used for 3D / heat-flow inspection after a solve."""
-    if study.mode == "environment_compare":
-        return study.primary.name  # Case C
-    if study.mode == SCENARIO_COMPARE_MODE:
-        return SCENARIO_CASE_NOMINAL
     return study.primary.name
 
 
@@ -706,34 +475,13 @@ def run_named_simulation(name: str, request: GuiRunRequest) -> NamedResult:
 
 
 def run_single_mode(request: GuiRunRequest) -> CompletedGuiStudy:
-    """Mode 1: one user simulation."""
+    """Satellite Thermal Simulation: one user run."""
     primary = run_named_simulation(SINGLE_CASE_NAME, request)
     return CompletedGuiStudy(mode="single", primary=primary)
 
 
-def run_baseline_comparison_mode(request: GuiRunRequest) -> CompletedGuiStudy:
-    """Mode 2: default reference vs user-modified case."""
-    baseline_request = default_gui_request()
-    # Match orbit count and time step so the comparison is fair by default.
-    baseline_request = GuiRunRequest(
-        **{
-            **baseline_request.__dict__,
-            "orbit_count": request.orbit_count,
-            "time_step_s": request.time_step_s,
-        }
-    )
-    baseline = run_named_simulation(REF_CASE_NAME, baseline_request)
-    modified = run_named_simulation(MOD_CASE_NAME, request)
-    return CompletedGuiStudy(
-        mode="baseline_compare",
-        primary=modified,
-        companions=(baseline,),
-        changed_fields=changed_parameter_labels(baseline_request, request),
-    )
-
-
 def run_environment_comparison_mode(request: GuiRunRequest) -> CompletedGuiStudy:
-    """Mode 3: No Earth heating → +Earth IR → +Earth IR + albedo."""
+    """Compare Heat Sources: No Earth heating → +Earth IR → +Earth IR + albedo."""
     case_a_req = GuiRunRequest(
         **{
             **request.__dict__,
@@ -762,96 +510,6 @@ def run_environment_comparison_mode(request: GuiRunRequest) -> CompletedGuiStudy
         mode="environment_compare",
         primary=case_c,
         companions=(case_a, case_b),
-    )
-
-
-def run_scenario_comparison_mode(request: GuiRunRequest) -> CompletedGuiStudy:
-    """Mode 4: Cold / Nominal / Hot screening with shared spacecraft settings."""
-    cold_req = apply_thermal_scenario(request, ThermalScenarioId.COLD)
-    nominal_req = apply_thermal_scenario(request, ThermalScenarioId.NOMINAL)
-    hot_req = apply_thermal_scenario(request, ThermalScenarioId.HOT)
-    cold = run_named_simulation(SCENARIO_CASE_COLD, cold_req)
-    nominal = run_named_simulation(SCENARIO_CASE_NOMINAL, nominal_req)
-    hot = run_named_simulation(SCENARIO_CASE_HOT, hot_req)
-    return CompletedGuiStudy(
-        mode=SCENARIO_COMPARE_MODE,
-        primary=nominal,
-        companions=(cold, hot),
-        changed_fields=(
-            "Thermal screening scenario (Cold / Nominal / Hot overlays)",
-        ),
-    )
-
-
-def scenario_comparison_summary_rows(
-    curves: tuple[NamedResult, ...],
-) -> list[dict[str, object]]:
-    """Final-temperature summary for Cold / Nominal / Hot curves."""
-    if len(curves) != 3:
-        raise ValueError("Scenario summary requires exactly three curves.")
-    by_name = {curve.name: curve for curve in curves}
-    ordered = (
-        by_name[SCENARIO_CASE_COLD],
-        by_name[SCENARIO_CASE_NOMINAL],
-        by_name[SCENARIO_CASE_HOT],
-    )
-    rows: list[dict[str, object]] = []
-    nominal_final = temperature_metrics_c(ordered[1].result)["final_c"]
-    for curve in ordered:
-        metrics = temperature_metrics_c(curve.result)
-        delta = metrics["final_c"] - nominal_final
-        rows.append(
-            {
-                "Scenario": curve.name,
-                "β (°)": round(curve.request.beta_deg, 2),
-                "S (W/m²)": round(curve.request.solar_flux_w_per_m2, 1),
-                "Albedo": round(curve.request.earth_bond_albedo, 3),
-                "OLR (W/m²)": round(curve.request.earth_olr_w_per_m2, 2),
-                "Q_internal (W)": round(curve.request.internal_heat_w, 2),
-                "Final (°C)": round(metrics["final_c"], 2),
-                "vs Nominal (K)": (
-                    "Reference" if curve.name == SCENARIO_CASE_NOMINAL else f"{delta:+.2f}"
-                ),
-            }
-        )
-    return rows
-
-
-def scenario_comparison_interpretation(curves: tuple[NamedResult, ...]) -> str:
-    """Short interpretation of Cold/Nominal/Hot final temperatures."""
-    if len(curves) != 3:
-        raise ValueError("Scenario interpretation requires exactly three curves.")
-    by_name = {curve.name: curve for curve in curves}
-    cold = temperature_metrics_c(by_name[SCENARIO_CASE_COLD].result)["final_c"]
-    nominal = temperature_metrics_c(by_name[SCENARIO_CASE_NOMINAL].result)["final_c"]
-    hot = temperature_metrics_c(by_name[SCENARIO_CASE_HOT].result)["final_c"]
-    d_cold = cold - nominal
-    d_hot = hot - nominal
-    cold_phrase = (
-        f"about {abs(d_cold):.2f} °C cooler than Normal"
-        if d_cold < 0.0
-        else (
-            f"about {abs(d_cold):.2f} °C warmer than Normal"
-            if d_cold > 0.0
-            else "essentially the same as Normal"
-        )
-    )
-    hot_phrase = (
-        f"about {abs(d_hot):.2f} °C warmer than Normal"
-        if d_hot > 0.0
-        else (
-            f"about {abs(d_hot):.2f} °C cooler than Normal"
-            if d_hot < 0.0
-            else "essentially the same as Normal"
-        )
-    )
-    return (
-        "With this spacecraft setup, the Cold screening case finishes "
-        f"{cold_phrase}, while the Hot screening case finishes {hot_phrase}. "
-        "Those differences combine sunlight strength, Earth reflection, "
-        "eclipse exposure (β), and illustrative internal heating — not a "
-        "universal worst-case spacecraft design. These are model results, "
-        "not measured satellite temperatures."
     )
 
 
@@ -1088,17 +746,6 @@ def make_heat_flow_bar_figure(snapshot) -> object:
 def all_curves(study: CompletedGuiStudy) -> tuple[NamedResult, ...]:
     """Ordered curves for plotting a completed study."""
     if study.mode == "environment_compare":
-        # companions are A, B; primary is C
-        return (*study.companions, study.primary)
-    if study.mode == SCENARIO_COMPARE_MODE:
-        # companions are Cold, Hot; primary is Nominal — reorder Cold, Nominal, Hot.
-        by_name = {curve.name: curve for curve in (study.primary, *study.companions)}
-        return (
-            by_name[SCENARIO_CASE_COLD],
-            by_name[SCENARIO_CASE_NOMINAL],
-            by_name[SCENARIO_CASE_HOT],
-        )
-    if study.mode == "baseline_compare":
         return (*study.companions, study.primary)
     return (study.primary,)
 
@@ -1147,3 +794,44 @@ def _csv_escape(value: str) -> str:
     if any(char in value for char in (",", '"', "\n")):
         return '"' + value.replace('"', '""') + '"'
     return value
+
+
+# Retained for tests / typing clarity.
+__all__ = [
+    "CompletedGuiStudy",
+    "ENV_CASE_A",
+    "ENV_CASE_B",
+    "ENV_CASE_C",
+    "ENV_CASE_NAMES",
+    "GuiRunRequest",
+    "MAX_GUI_SAMPLES",
+    "NamedResult",
+    "PowerScheduleKind",
+    "SINGLE_CASE_NAME",
+    "THERMAL_MODEL_ENHANCED",
+    "THERMAL_MODEL_LEGACY",
+    "all_curves",
+    "apply_spacecraft_configuration",
+    "clamp_sample_index",
+    "comparison_metrics_rows",
+    "default_gui_request",
+    "default_inspect_curve_name",
+    "environment_comparison_interpretation",
+    "environment_comparison_summary_rows",
+    "estimate_gui_sample_count",
+    "figure_to_png_bytes",
+    "geometry_from_request",
+    "make_comparison_temperature_figure",
+    "make_gui_temperature_figure",
+    "make_heat_flow_bar_figure",
+    "power_schedule_from_request",
+    "request_fingerprint",
+    "resolve_inspect_curve",
+    "run_environment_comparison_mode",
+    "run_gui_simulation",
+    "run_named_simulation",
+    "run_single_mode",
+    "temperature_history_csv",
+    "temperature_metrics_c",
+    "validate_gui_request",
+]

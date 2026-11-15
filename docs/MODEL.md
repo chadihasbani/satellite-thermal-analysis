@@ -4,6 +4,23 @@ Detailed equations, assumptions, and phase-by-phase notes for the satellite
 thermal analysis project. For a short overview and how to run the app, see
 the root [`README.md`](../README.md).
 
+## Current product scope (simplified V2)
+
+The public Streamlit application retains:
+
+- Single-node energy balance with explicit Euler integration
+- Circular LEO, beta angle, and cylindrical eclipse geometry
+- Solar, Earth IR, albedo, constant internal power, and radiative cooling
+- Legacy fixed-area and enhanced face-based solar heating (**fixed inertial** only)
+- Two analysis modes: Satellite Thermal Simulation and Compare Heat Sources
+- PDF engineering reports (Chromium/Kaleido orbital snapshot with fallback)
+
+Removed from the application (historical text below may still mention them for
+traceability): nadir/Sun attitude modes, variable power schedules, Hot/Cold/Nominal
+screening scenarios, and Reference-vs-Modified configuration comparison.
+
+---
+
 Phase 1 is the lumped energy balance in continuous sunlight. Phase 2 keeps
 that balance and adds a circular low-Earth orbit. Direct solar heating is
 turned off only while a cylindrical Earth-shadow test says the satellite is
