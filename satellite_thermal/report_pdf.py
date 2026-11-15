@@ -17,14 +17,10 @@ from pathlib import Path
 
 from satellite_thermal.gui_support import (
     ENV_CASE_NAMES,
-    MOD_CASE_NAME,
-    REF_CASE_NAME,
-    SCENARIO_COMPARE_MODE,
     CompletedGuiStudy,
     GuiRunRequest,
     NamedResult,
     all_curves,
-    changed_parameter_rows,
     comparison_metrics_rows,
     environment_comparison_interpretation,
     environment_comparison_summary_rows,
@@ -33,14 +29,10 @@ from satellite_thermal.gui_support import (
     make_comparison_temperature_figure,
     make_gui_temperature_figure,
     make_heat_flow_bar_figure,
-    parse_custom_intervals_text,
     power_schedule_from_request,
-    scenario_comparison_interpretation,
-    scenario_comparison_summary_rows,
     temperature_metrics_c,
 )
 from satellite_thermal.heat_flows import heat_flow_at_index
-from satellite_thermal.internal_power import PowerScheduleKind, parse_power_schedule_kind
 from satellite_thermal.orbit import (
     analytical_eclipse_duration_s,
     critical_beta_rad,
@@ -55,26 +47,13 @@ from satellite_thermal.spacecraft_configurations import (
     parse_spacecraft_configuration_id,
 )
 from satellite_thermal.spacecraft_geometry import RectangularBusGeometry
-from satellite_thermal.thermal_scenarios import (
-    ThermalScenarioId,
-    parse_thermal_scenario_id,
-    scenario_select_options,
-)
 
 SIMULATOR_VERSION = "2.0.0"
 SIMULATOR_NAME = "Satellite Thermal Analysis Simulator"
 
 MODE_TITLES = {
-    "single": "Single Simulation",
-    "baseline_compare": "Compare Configurations",
+    "single": "Satellite Thermal Simulation",
     "environment_compare": "Compare Heat Sources",
-    "scenario_compare": "Compare Conditions",
-}
-
-ATTITUDE_LABELS = {
-    "fixed_inertial": "Fixed orientation (inertial)",
-    "nadir_pointing": "Earth-facing (nadir-pointing)",
-    "sun_pointing": "Sun-facing (Sun-pointing)",
 }
 
 ORBITAL_IMAGE_UNAVAILABLE_NOTE = (
@@ -101,8 +80,6 @@ class ReportMeta:
 
     configuration_id: str
     configuration_label: str
-    scenario_id: str
-    scenario_label: str
 
 
 @dataclass(frozen=True)
@@ -116,88 +93,21 @@ class EngineeringReportPdf:
 
 def default_report_meta(
     configuration_id: str = SpacecraftConfigurationId.CUSTOM.value,
-    scenario_id: str = ThermalScenarioId.CUSTOM.value,
 ) -> ReportMeta:
-    """Build report metadata from configuration / scenario identifiers."""
+    """Build report metadata from configuration identifiers."""
     config_labels = dict(configuration_select_options())
-    scenario_labels = dict(scenario_select_options())
     return ReportMeta(
         configuration_id=parse_spacecraft_configuration_id(configuration_id).value,
         configuration_label=config_labels.get(configuration_id, configuration_id),
-        scenario_id=parse_thermal_scenario_id(scenario_id).value,
-        scenario_label=scenario_labels.get(scenario_id, scenario_id),
     )
-
-
-def overall_baseline_delta_c(study: CompletedGuiStudy) -> float:
-    """Modified final temperature minus Reference (°C).
-
-    Independent of which case is selected for 3D / heat-flow inspection.
-    """
-    if study.mode != "baseline_compare" or not study.companions:
-        raise ValueError("overall_baseline_delta_c requires baseline_compare with a reference.")
-    reference_final = temperature_metrics_c(study.companions[0].result)["final_c"]
-    modified_final = temperature_metrics_c(study.primary.result)["final_c"]
-    return modified_final - reference_final
 
 
 def power_schedule_detail_rows(request: GuiRunRequest) -> list[tuple[str, str]]:
     """Reproducible internal-power parameters from a frozen request."""
-    kind = parse_power_schedule_kind(request.power_schedule_kind)
-    rows: list[tuple[str, str]] = [
-        ("Internal power schedule", kind.value),
+    return [
+        ("Internal heat schedule", "constant"),
+        ("Internal heat dissipation", f"{request.internal_heat_w:.3g} W"),
     ]
-    if kind is PowerScheduleKind.CONSTANT:
-        rows.append(("Constant internal power", f"{request.internal_heat_w:.3g} W"))
-        return rows
-    if kind is PowerScheduleKind.ECLIPSE_REDUCED:
-        rows.extend(
-            [
-                ("Sunlit (nominal) power", f"{request.nominal_power_w:.3g} W"),
-                ("Eclipse (standby) power", f"{request.standby_power_w:.3g} W"),
-                (
-                    "Baseline outside schedule semantics",
-                    f"{request.internal_heat_w:.3g} W (stored baseline field)",
-                ),
-            ]
-        )
-        return rows
-    if kind is PowerScheduleKind.PERIODIC_HIGH:
-        rows.extend(
-            [
-                ("Baseline / nominal power", f"{request.nominal_power_w:.3g} W"),
-                ("High power", f"{request.high_power_w:.3g} W"),
-                ("Pulse period", f"{request.periodic_period_s:.3g} s"),
-                ("High-power duration", f"{request.periodic_high_duration_s:.3g} s"),
-                (
-                    "Stored baseline field",
-                    f"{request.internal_heat_w:.3g} W",
-                ),
-            ]
-        )
-        return rows
-    # Custom intervals
-    rows.append(
-        (
-            "Baseline power (outside intervals)",
-            f"{request.internal_heat_w:.3g} W",
-        )
-    )
-    intervals = parse_custom_intervals_text(request.custom_intervals_text)
-    if not intervals:
-        rows.append(("Custom intervals", "(none — baseline applies everywhere)"))
-    else:
-        for index, interval in enumerate(intervals, start=1):
-            rows.append(
-                (
-                    f"Interval {index}",
-                    (
-                        f"[{interval.start_s:.6g}, {interval.end_s:.6g}) s → "
-                        f"{interval.power_w:.3g} W"
-                    ),
-                )
-            )
-    return rows
 
 
 def _mode_cover_rows(
@@ -212,39 +122,10 @@ def _mode_cover_rows(
         ("Spacecraft configuration", meta.configuration_label),
     ]
     if study.mode == "single":
-        rows.append(("Environmental preset", meta.scenario_label))
         rows.append(("Reported case", viz_curve.name))
-    elif study.mode == "baseline_compare":
-        rows.append(
-            (
-                "Compared cases",
-                f"{REF_CASE_NAME} (repository defaults) vs {MOD_CASE_NAME} (user settings)",
-            )
-        )
-        rows.append(("Inspection snapshot case", viz_curve.name))
     elif study.mode == "environment_compare":
-        rows.append(
-            (
-                "Compared cases",
-                " → ".join(ENV_CASE_NAMES),
-            )
-        )
-        rows.append(("Shared environmental preset", meta.scenario_label))
-        rows.append(("Inspection snapshot case", viz_curve.name))
-    elif study.mode == SCENARIO_COMPARE_MODE:
-        rows.append(
-            (
-                "Compared cases",
-                "Cold screening, Nominal, and Hot screening (shared spacecraft)",
-            )
-        )
-        rows.append(
-            (
-                "Note",
-                "Each curve applies its own environmental overlay — not a single Custom case.",
-            )
-        )
-        rows.append(("Inspection snapshot case", viz_curve.name))
+        rows.append(("Compared cases", " → ".join(ENV_CASE_NAMES)))
+        rows.append(("Inspected case", viz_curve.name))
     else:
         rows.append(("Inspection snapshot case", viz_curve.name))
     return rows
@@ -324,24 +205,6 @@ def _temperature_figure_png(study: CompletedGuiStudy, viz_curve: NamedResult, sa
             title="Predicted spacecraft temperature",
             label=study.primary.name,
         )
-    elif study.mode == "baseline_compare":
-        fig = make_comparison_temperature_figure(
-            curves,
-            marker_index=sample_index,
-            marker_curve_name=viz_curve.name,
-            emphasize_name=viz_curve.name,
-            title="Reference vs modified settings",
-            shade_from=curves[0],
-        )
-    elif study.mode == SCENARIO_COMPARE_MODE:
-        fig = make_comparison_temperature_figure(
-            curves,
-            marker_index=sample_index,
-            marker_curve_name=viz_curve.name,
-            emphasize_name=viz_curve.name,
-            title="Cold / Normal / Hot thermal screening",
-            shade_from=curves[0],
-        )
     else:
         fig = make_comparison_temperature_figure(
             curves,
@@ -396,8 +259,6 @@ def build_engineering_report_pdf(
             f"sample_index {sample_index} out of range for {n_samples} stored samples."
         )
 
-    # Snapshot / heat-flow follow the inspected case. Overall comparison metrics
-    # for baseline_compare always use Modified − Reference.
     request = viz_curve.request
     snap = heat_flow_at_index(
         result=viz_curve.result,
@@ -414,13 +275,7 @@ def build_engineering_report_pdf(
         power_schedule=power_schedule_from_request(request),
     )
     inspect_metrics = temperature_metrics_c(viz_curve.result)
-    # Shared spacecraft description: prefer Modified / primary for baseline,
-    # otherwise the inspected curve (same geometry in env/scenario modes).
-    config_request = (
-        study.primary.request
-        if study.mode == "baseline_compare"
-        else request
-    )
+    config_request = study.primary.request
     period_s = orbital_period_s(viz_curve.orbit)
     radius_m = orbital_radius_m(viz_curve.orbit)
     beta_c_deg = math.degrees(critical_beta_rad(viz_curve.orbit))
@@ -612,40 +467,7 @@ def build_engineering_report_pdf(
 
     # --- Executive summary ---
     summary_bits: list = [section("1. Executive summary")]
-    if study.mode == "baseline_compare" and study.companions:
-        ref_m = temperature_metrics_c(study.companions[0].result)
-        mod_m = temperature_metrics_c(study.primary.result)
-        delta = overall_baseline_delta_c(study)
-        summary_bits.append(
-            p(
-                f"A <b>{mode_title}</b> was completed for "
-                f"<b>{meta.configuration_label}</b> "
-                f"({config_request.thermal_model} thermal model) at "
-                f"{config_request.altitude_km:.0f} km altitude. "
-                f"{config_request.orbit_count} orbit(s) were integrated with a "
-                f"{config_request.time_step_s:.1f} s nominal time step. "
-                "Overall comparison uses <b>Modified − Reference</b> and does not "
-                "change when a different inspection case is selected."
-            )
-        )
-        summary_bits.append(
-            kv_table(
-                [
-                    ("Reference final temperature", f"{ref_m['final_c']:.2f} °C"),
-                    ("Modified final temperature", f"{mod_m['final_c']:.2f} °C"),
-                    ("Overall difference (Modified − Reference)", f"{delta:+.2f} °C"),
-                    (
-                        "Inspection snapshot",
-                        (
-                            f"{viz_curve.name}: {snap.temperature_c:.2f} °C · "
-                            f"{'eclipsed' if snap.in_eclipse else 'sunlit'} · "
-                            f"t = {snap.time_s / 60.0:.2f} min"
-                        ),
-                    ),
-                ]
-            )
-        )
-    elif study.mode in ("environment_compare", SCENARIO_COMPARE_MODE) and len(curves) == 3:
+    if study.mode == "environment_compare" and len(curves) == 3:
         summary_bits.append(
             p(
                 f"A <b>{mode_title}</b> was completed for "
@@ -656,20 +478,17 @@ def build_engineering_report_pdf(
                 "case-to-case results appear in the comparison section."
             )
         )
-        if study.mode == "environment_compare":
-            summary_bits.append(p(environment_comparison_interpretation(curves)))
-        else:
-            summary_bits.append(p(scenario_comparison_interpretation(curves)))
+        summary_bits.append(p(environment_comparison_interpretation(curves)))
         summary_bits.append(
             kv_table(
                 [
                     (
-                        "Inspection case",
+                        "Inspected case",
                         viz_curve.name,
                     ),
-                    ("Predicted final (inspect case)", f"{inspect_metrics['final_c']:.2f} °C"),
-                    ("Predicted minimum (inspect case)", f"{inspect_metrics['minimum_c']:.2f} °C"),
-                    ("Predicted maximum (inspect case)", f"{inspect_metrics['maximum_c']:.2f} °C"),
+                    ("Predicted final (inspected case)", f"{inspect_metrics['final_c']:.2f} °C"),
+                    ("Predicted minimum (inspected case)", f"{inspect_metrics['minimum_c']:.2f} °C"),
+                    ("Predicted maximum (inspected case)", f"{inspect_metrics['maximum_c']:.2f} °C"),
                     (
                         "At selected sample",
                         (
@@ -797,10 +616,7 @@ def build_engineering_report_pdf(
                     ("Thermal model", config_request.thermal_model),
                     (
                         "Spacecraft orientation",
-                        ATTITUDE_LABELS.get(
-                            config_request.attitude_mode,
-                            config_request.attitude_mode,
-                        ),
+                        "Fixed orientation (inertial)",
                     ),
                 ]
             ),
@@ -838,14 +654,6 @@ def build_engineering_report_pdf(
         ("Include Earth infrared", "Yes" if request.include_earth_infrared else "No"),
         ("Include reflected sunlight (albedo)", "Yes" if request.include_albedo else "No"),
     ]
-    if study.mode == SCENARIO_COMPARE_MODE:
-        orbit_rows.insert(
-            0,
-            (
-                "Values shown for",
-                f"inspection case “{viz_curve.name}” (other screening cases differ)",
-            ),
-        )
     story.append(
         block(
             section("3. Orbital and environmental conditions"),
@@ -860,7 +668,7 @@ def build_engineering_report_pdf(
     )
     story.append(
         block(
-            section("4. Internal equipment heating schedule"),
+            section("4. Internal equipment heating"),
             kv_table(power_schedule_detail_rows(request)),
             p(
                 "These power values are taken from the frozen completed-simulation "
@@ -913,8 +721,7 @@ def build_engineering_report_pdf(
         f"predicted spacecraft temperature = {snap.temperature_c:.2f} °C, "
         f"{'orbital eclipse' if snap.in_eclipse else 'sunlit'}, "
         f"β = {request.beta_deg:.1f}°, "
-        f"spacecraft orientation = "
-        f"{ATTITUDE_LABELS.get(request.attitude_mode, request.attitude_mode)}."
+        "spacecraft orientation = fixed inertial."
     )
     if orbit_png is not None:
         story.append(image_flow(orbit_png, width_mm=150, height_mm=108))
@@ -1001,34 +808,7 @@ def build_engineering_report_pdf(
             )
         )
         story.append(Spacer(1, 3 * mm))
-        if study.mode == "baseline_compare" and study.companions:
-            delta = overall_baseline_delta_c(study)
-            story.append(
-                p(
-                    f"Overall result difference uses <b>Modified − Reference = "
-                    f"{delta:+.2f} °C</b> on final predicted temperatures. "
-                    f"Selecting “{viz_curve.name}” for inspection only changes the "
-                    "3D snapshot and instantaneous heat-flow section above."
-                )
-            )
-            rows = changed_parameter_rows(
-                study.companions[0].request, study.primary.request
-            )
-            if rows:
-                story.append(
-                    multi_table(
-                        ["Parameter", "Reference", "Modified"],
-                        [
-                            [r["Parameter"], str(r["Reference"]), str(r["Modified"])]
-                            for r in rows[:40]
-                        ],
-                    )
-                )
-            else:
-                story.append(
-                    p("No parameter differences relative to the reference defaults.")
-                )
-        elif study.mode == "environment_compare" and len(curves) == 3:
+        if study.mode == "environment_compare" and len(curves) == 3:
             story.append(p(environment_comparison_interpretation(curves)))
             summary = environment_comparison_summary_rows(curves)
             story.append(
@@ -1052,44 +832,6 @@ def build_engineering_report_pdf(
                     f"({ENV_CASE_NAMES[0]} → {ENV_CASE_NAMES[1]} → {ENV_CASE_NAMES[2]})."
                 )
             )
-        elif study.mode == SCENARIO_COMPARE_MODE and len(curves) == 3:
-            story.append(p(scenario_comparison_interpretation(curves)))
-            summary = scenario_comparison_summary_rows(curves)
-            story.append(
-                multi_table(
-                    [
-                        "Scenario",
-                        "β (°)",
-                        "S (W/m²)",
-                        "Albedo",
-                        "OLR (W/m²)",
-                        "Q_int (W)",
-                        "Final (°C)",
-                        "vs Nominal",
-                    ],
-                    [
-                        [
-                            r["Scenario"],
-                            f"{r['β (°)']:.2f}",
-                            f"{r['S (W/m²)']:.1f}",
-                            f"{r['Albedo']:.3f}",
-                            f"{r['OLR (W/m²)']:.2f}",
-                            f"{r['Q_internal (W)']:.2f}",
-                            f"{r['Final (°C)']:.2f}",
-                            str(r["vs Nominal (K)"]),
-                        ]
-                        for r in summary
-                    ],
-                )
-            )
-            story.append(
-                p(
-                    "Cold, Nominal, and Hot thermal screening overlays change "
-                    "environmental fluxes, beta, and constant internal power together "
-                    "on the same spacecraft. Differences are not attributable to a "
-                    "single isolated variable."
-                )
-            )
 
     # --- Numerical method ---
     story.append(
@@ -1098,9 +840,8 @@ def build_engineering_report_pdf(
             p(
                 "The governing lumped energy balance is "
                 "<b>m · cp · dT/dt = Q_solar + Q_earth_ir + Q_albedo + Q_internal − Q_radiated</b>. "
-                "Time integration uses explicit Euler. Scheduled internal-power changes "
-                "insert event-aware samples so transitions are not skipped between steps. "
-                "Orbital eclipse is evaluated with a cylindrical Earth-shadow test at each "
+                "Time integration uses explicit Euler with a constant internal-power "
+                "load. Orbital eclipse is evaluated with a cylindrical Earth-shadow test at each "
                 "sample. Full equations and assumptions are documented in docs/MODEL.md."
             ),
         )

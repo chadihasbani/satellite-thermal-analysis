@@ -14,11 +14,12 @@ new capability was added:
 2. Circular LEO orbit and cylindrical eclipse geometry
 3. Earth infrared heating, then Earth albedo
 4. Parameter sensitivity studies
-5. Streamlit GUI with comparison modes, synchronized 3D orbit view, and
-   heat-flow diagnostics
-6. Version 2 physics checkpoints (beta, attitude/faces, power schedules,
-   screening scenarios, CubeSat configurations) with integration verification
-7. UI simplification, PDF engineering reports, and public-release documentation
+5. Streamlit GUI with synchronized 3D orbit view and heat-flow diagnostics
+6. Version 2 physics checkpoints (beta, face-based heating, CubeSat
+   configurations) with integration verification
+7. PDF engineering reports and public-release documentation
+8. Product simplification: two analysis modes, constant power, fixed-inertial
+   orientation only, and a cleaner Streamlit UI
 
 Physics live in `satellite_thermal/`. The GUI (`app.py`) and CLI scripts under
 `scripts/` call those solvers; they do not re-implement the thermal equations.

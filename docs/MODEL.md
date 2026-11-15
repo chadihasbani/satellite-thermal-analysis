@@ -4,6 +4,23 @@ Detailed equations, assumptions, and phase-by-phase notes for the satellite
 thermal analysis project. For a short overview and how to run the app, see
 the root [`README.md`](../README.md).
 
+## Current product scope (simplified V2)
+
+The public Streamlit application retains:
+
+- Single-node energy balance with explicit Euler integration
+- Circular LEO, beta angle, and cylindrical eclipse geometry
+- Solar, Earth IR, albedo, constant internal power, and radiative cooling
+- Legacy fixed-area and enhanced face-based solar heating (**fixed inertial** only)
+- Two analysis modes: Satellite Thermal Simulation and Compare Heat Sources
+- PDF engineering reports (Chromium/Kaleido orbital snapshot with fallback)
+
+Removed from the application (historical text below may still mention them for
+traceability): nadir/Sun attitude modes, variable power schedules, Hot/Cold/Nominal
+screening scenarios, and Reference-vs-Modified configuration comparison.
+
+---
+
 Phase 1 is the lumped energy balance in continuous sunlight. Phase 2 keeps
 that balance and adds a circular low-Earth orbit. Direct solar heating is
 turned off only while a cylindrical Earth-shadow test says the satellite is
@@ -630,6 +647,11 @@ same solar and radiation terms because only the +X face is sunlit and
 
 ### Attitude modes (prescribed geometry only)
 
+**Current application:** fixed inertial only.
+
+Historical Checkpoint 2 library modes (still covered by unit tests where
+retained; not exposed in the simplified GUI):
+
 1. **Fixed inertial** — body axes = inertial XYZ.
 2. **Nadir-pointing** — +Z = nadir (−`r̂`), +X = along-track (`θ̂`), +Y completes RH.
 3. **Sun-pointing** — +X = `s`; +Y from `ĥ × s`, with fallback to `θ̂` (then
@@ -651,6 +673,10 @@ lectures). See [`SOURCE_TRACEABILITY.md`](SOURCE_TRACEABILITY.md).
 
 ## Version 2.0 — Checkpoint 3: time-dependent internal power
 
+**Current application:** constant internal power only (default 5 W). The schedule
+kinds below are historical Checkpoint 3 development records; variable schedules
+are not offered in the simplified GUI.
+
 ### Energy balance
 
 ```text
@@ -660,11 +686,11 @@ m * cp * dT/dt = Q_solar(t) + Q_earth_ir(t) + Q_albedo(t) + Q_internal(t) - Q_ra
 `Q_internal(t)` is evaluated at the **start** of each explicit Euler step, using
 the same time and eclipse flag as solar gating.
 
-### Schedule kinds
+### Schedule kinds (historical library)
 
 | Kind | Rule |
 | --- | --- |
-| `constant` | `Q_internal =` GUI Internal heat (W); default 5 W (V1) |
+| `constant` | `Q_internal =` GUI Internal heat (W); default 5 W (V1) — **current GUI** |
 | `eclipse_reduced` | sunlight → nominal W; eclipse → standby W (actual β-aware eclipse) |
 | `periodic_high` | within each period `[nP,(n+1)P)`, high on `[nP, nP+D)`, else base |
 | `custom_intervals` | half-open `[start,end)`; no overlaps; else baseline Internal heat |
@@ -718,6 +744,12 @@ model is included.
 
 ## Version 2.0 — Checkpoint 4: hot / nominal / cold screening scenarios
 
+**Not in the current application.** Hot/Nominal/Cold screening and the former
+“Compare Conditions” mode were removed in the product simplification. The
+derivation and GD-AP-2301 notes below are retained as historical V2 development
+records and source context. The live Compare Heat Sources mode is the A/B/C
+environmental stack (sunlight → +Earth IR → +albedo), not Hot/Cold screening.
+
 ### Modelling convention choice
 
 Two common LEO environmental screening conventions were considered:
@@ -761,17 +793,12 @@ case is still colder because of lower solar, lower albedo, maximum eclipse
 Presets are **screening scenarios**, not universal worst-case spacecraft
 conditions. Custom mode leaves sidebar values unchanged.
 
-### GUI behaviour
+### Historical GUI behaviour (removed)
 
-- Scenario selector: Nominal / Hot / Cold / Custom.
-- While Nominal / Hot / Cold is selected, preset-owned inputs (S, a, E_olr, β,
-  constant internal power, power-schedule kind, and planetary-load flags) are
-  **locked** and re-synchronized from the preset definition (Hot β updates when
-  altitude changes). Custom re-enables editing with no hidden overrides.
-- Compare Hot/Nominal/Cold mode solves all three overlays on shared spacecraft
-  settings (mass, coatings, areas, altitude, step, thermal model, attitude).
-- Existing single, reference-compare, and A/B/C environment modes remain and
-  may optionally apply one preset overlay before solving.
+The former scenario selector (Nominal / Hot / Cold / Custom), locked
+preset-owned environmental fields, and Compare Hot/Nominal/Cold mode are
+documented here for traceability only. They are not present in the simplified
+application.
 
 ## Version 2.0 — Checkpoint 5: CubeSat-inspired configurations
 
@@ -830,13 +857,15 @@ double-counting). Visual solar wings remain decorative only.
 
 Spacecraft presets lock and synchronize dimensions, mass, effective cp, optics,
 thermal-model kind, and related area fields so the sidebar cannot contradict
-the solver. Custom unlocks editing. Hot/Nominal/Cold scenario compare continues
-to share one spacecraft configuration across all three environmental cases.
+the solver. Custom unlocks editing. The current Compare Heat Sources mode shares
+one spacecraft configuration across the three environmental heat-source cases.
 
 ## Version 2.0 — Checkpoint 6: integration and numerical verification
 
 Checkpoint 6 does **not** add new physics. It combines Checkpoints 1–5 and
-checks consistency:
+checks consistency. Several integrated cases exercise historical library
+features (schedules, multi-attitude, Hot/Cold) that are no longer in the GUI;
+core orbital, energy-balance, and V1 baseline checks remain active.
 
 - Integrated Cases A–E (generic 3U; β = 0° vs 75°; scheduled power; attitudes;
   Hot/Nominal/Cold) in `tests/test_checkpoint6_integration.py`.
@@ -855,8 +884,9 @@ checks consistency:
   is acceptable and documented.
 - Legacy Version 1.0 environment stack finals remain
   −12.5661 / −6.8313 / −4.5386 °C at 500 km, five orbits, `dt = 1` s.
-- GUI: “Compare to Reference Defaults” clarifies that the modified case may
-  change orbit and operations as well as spacecraft properties.
+- Current GUI modes: Satellite Thermal Simulation and Compare Heat Sources
+  (the former “Compare to Reference Defaults” / configuration-compare mode was
+  removed in the product simplification).
 
 See `docs/SOURCE_TRACEABILITY.md` and `docs/VERIFICATION.md` for the source-audit table and
 claim boundaries.

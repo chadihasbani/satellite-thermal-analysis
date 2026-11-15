@@ -9,12 +9,12 @@ from satellite_thermal.attitude import (
     AttitudeMode,
     body_axes_inertial,
     orbital_basis,
+    parse_attitude_mode,
 )
 from satellite_thermal.gui_support import (
     GuiRunRequest,
     all_curves,
     default_gui_request,
-    run_baseline_comparison_mode,
     run_environment_comparison_mode,
     run_single_mode,
     temperature_metrics_c,
@@ -33,13 +33,6 @@ from satellite_thermal.surface_heating import (
     surface_radiative_cooling_w,
     surface_solar_heating_w,
 )
-
-
-def _independent_dot(
-    a: tuple[float, float, float],
-    b: tuple[float, float, float],
-) -> float:
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 
 class GeometryAreaTests(unittest.TestCase):
@@ -151,37 +144,15 @@ class AttitudeModeTests(unittest.TestCase):
         self.assertEqual(y, (0.0, 1.0, 0.0))
         self.assertEqual(z, (0.0, 0.0, 1.0))
 
-    def test_nadir_pointing_z_toward_earth(self) -> None:
-        theta = math.radians(25.0)
-        r_hat, theta_hat, _ = orbital_basis(theta)
-        x, y, z = body_axes_inertial(
-            AttitudeMode.NADIR_POINTING, theta, sun_direction(0.0)
+    def test_only_fixed_inertial_is_accepted(self) -> None:
+        self.assertEqual(
+            parse_attitude_mode(AttitudeMode.FIXED_INERTIAL),
+            AttitudeMode.FIXED_INERTIAL,
         )
-        for component, expected in zip(z, (-r_hat[0], -r_hat[1], -r_hat[2])):
-            self.assertAlmostEqual(component, expected, places=12)
-        for component, expected in zip(x, theta_hat):
-            self.assertAlmostEqual(component, expected, places=12)
-        # Right-handed triad.
-        self.assertAlmostEqual(_independent_dot(x, y), 0.0, places=12)
-        self.assertAlmostEqual(_independent_dot(y, z), 0.0, places=12)
-        self.assertAlmostEqual(_independent_dot(z, x), 0.0, places=12)
-
-    def test_sun_pointing_x_toward_sun(self) -> None:
-        sun = sun_direction(math.radians(20.0))
-        x, y, z = body_axes_inertial(AttitudeMode.SUN_POINTING, 0.7, sun)
-        for component, expected in zip(x, sun):
-            self.assertAlmostEqual(component, expected, places=12)
-        self.assertAlmostEqual(_independent_dot(x, y), 0.0, places=12)
-        self.assertAlmostEqual(_independent_dot(y, z), 0.0, places=12)
-        self.assertAlmostEqual(math.sqrt(_independent_dot(z, z)), 1.0, places=12)
-
-    def test_sun_pointing_singularity_near_orbit_normal(self) -> None:
-        # Sun nearly along +Z: secondary reference must switch without crashing.
-        sun = (1.0e-8, 0.0, 1.0)
-        x, y, z = body_axes_inertial(AttitudeMode.SUN_POINTING, 0.0, sun)
-        self.assertAlmostEqual(math.sqrt(_independent_dot(x, x)), 1.0, places=9)
-        self.assertAlmostEqual(math.sqrt(_independent_dot(y, y)), 1.0, places=9)
-        self.assertAlmostEqual(math.sqrt(_independent_dot(z, z)), 1.0, places=9)
+        with self.assertRaises(ValueError):
+            parse_attitude_mode("nadir_pointing")
+        with self.assertRaises(ValueError):
+            body_axes_inertial("sun_pointing", 0.0, sun_direction(0.0))
 
 
 class RadiationConsistencyTests(unittest.TestCase):
@@ -241,7 +212,7 @@ class GuiPropagationTests(unittest.TestCase):
             **{
                 **default_gui_request().__dict__,
                 "thermal_model": "enhanced",
-                "attitude_mode": "nadir_pointing",
+                "attitude_mode": "fixed_inertial",
                 "body_length_m": 0.2,
                 "orbit_count": 1,
                 "time_step_s": 30.0,
@@ -249,21 +220,13 @@ class GuiPropagationTests(unittest.TestCase):
         )
         single = run_single_mode(request)
         self.assertEqual(single.primary.request.thermal_model, "enhanced")
-        self.assertEqual(single.primary.request.attitude_mode, "nadir_pointing")
+        self.assertEqual(single.primary.request.attitude_mode, "fixed_inertial")
 
         env = run_environment_comparison_mode(request)
         for curve in all_curves(env):
             self.assertEqual(curve.request.thermal_model, "enhanced")
-            self.assertEqual(curve.request.attitude_mode, "nadir_pointing")
+            self.assertEqual(curve.request.attitude_mode, "fixed_inertial")
             self.assertEqual(curve.request.body_length_m, 0.2)
-
-        base = run_baseline_comparison_mode(
-            GuiRunRequest(**{**request.__dict__, "mass_kg": 8.0})
-        )
-        reference, modified = all_curves(base)
-        self.assertEqual(reference.request.thermal_model, "legacy")
-        self.assertEqual(modified.request.thermal_model, "enhanced")
-        self.assertEqual(modified.request.attitude_mode, "nadir_pointing")
 
     def test_legacy_gui_default_preserves_v1_finals(self) -> None:
         request = GuiRunRequest(

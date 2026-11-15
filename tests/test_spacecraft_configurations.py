@@ -9,12 +9,9 @@ from satellite_thermal.gui_support import (
     GuiRunRequest,
     all_curves,
     apply_spacecraft_configuration,
-    apply_thermal_scenario,
     default_gui_request,
-    run_baseline_comparison_mode,
     run_environment_comparison_mode,
     run_gui_simulation,
-    run_scenario_comparison_mode,
     run_single_mode,
     temperature_metrics_c,
 )
@@ -43,7 +40,6 @@ from satellite_thermal.surface_heating import (
     projected_solar_area_m2,
     surface_radiative_cooling_w,
 )
-from satellite_thermal.thermal_scenarios import ThermalScenarioId
 
 
 class CubeSatEnvelopeTests(unittest.TestCase):
@@ -105,9 +101,8 @@ class ConfigurationApplicationTests(unittest.TestCase):
                 **default_gui_request().__dict__,
                 "altitude_km": 600.0,
                 "beta_deg": 20.0,
-                "power_schedule_kind": "periodic_high",
                 "internal_heat_w": 7.0,
-                "attitude_mode": "nadir_pointing",
+                "attitude_mode": "fixed_inertial",
             }
         )
         applied = apply_spacecraft_configuration(
@@ -115,9 +110,8 @@ class ConfigurationApplicationTests(unittest.TestCase):
         )
         self.assertEqual(applied.altitude_km, 600.0)
         self.assertEqual(applied.beta_deg, 20.0)
-        self.assertEqual(applied.power_schedule_kind, "periodic_high")
         self.assertEqual(applied.internal_heat_w, 7.0)
-        self.assertEqual(applied.attitude_mode, "nadir_pointing")
+        self.assertEqual(applied.attitude_mode, "fixed_inertial")
         self.assertEqual(applied.body_height_m, CDS_3U_HEIGHT_M)
         self.assertEqual(applied.thermal_model, "enhanced")
 
@@ -223,32 +217,13 @@ class GuiModePropagationTests(unittest.TestCase):
             SpacecraftConfigurationId.CUBESAT_3U,
         )
         single = run_single_mode(request)
-        baseline = run_baseline_comparison_mode(request)
         environment = run_environment_comparison_mode(request)
-        scenarios = run_scenario_comparison_mode(request)
         self.assertEqual(single.primary.request.body_height_m, CDS_3U_HEIGHT_M)
-        self.assertEqual(baseline.primary.request.body_height_m, CDS_3U_HEIGHT_M)
+        self.assertEqual(single.primary.request.mass_kg, ILLUSTRATIVE_3U_MASS_KG)
         self.assertEqual(environment.primary.request.body_height_m, CDS_3U_HEIGHT_M)
-        for curve in all_curves(scenarios):
+        for curve in all_curves(environment):
             self.assertEqual(curve.request.body_height_m, CDS_3U_HEIGHT_M)
             self.assertEqual(curve.request.mass_kg, ILLUSTRATIVE_3U_MASS_KG)
-
-    def test_scenario_overlays_keep_shared_spacecraft(self) -> None:
-        request = apply_spacecraft_configuration(
-            GuiRunRequest(
-                **{
-                    **default_gui_request().__dict__,
-                    "orbit_count": 1,
-                    "time_step_s": 30.0,
-                }
-            ),
-            SpacecraftConfigurationId.CUBESAT_3U,
-        )
-        hot = apply_thermal_scenario(request, ThermalScenarioId.HOT)
-        cold = apply_thermal_scenario(request, ThermalScenarioId.COLD)
-        self.assertEqual(hot.body_height_m, cold.body_height_m)
-        self.assertEqual(hot.mass_kg, cold.mass_kg)
-        self.assertNotEqual(hot.solar_flux_w_per_m2, cold.solar_flux_w_per_m2)
 
     def test_legacy_baselines_with_legacy_configuration(self) -> None:
         request = apply_spacecraft_configuration(
@@ -268,23 +243,6 @@ class GuiModePropagationTests(unittest.TestCase):
         self.assertAlmostEqual(finals[0], -12.5661, places=3)
         self.assertAlmostEqual(finals[1], -6.8313, places=3)
         self.assertAlmostEqual(finals[2], -4.5386, places=3)
-
-    def test_event_aware_power_with_3u(self) -> None:
-        request = apply_spacecraft_configuration(
-            GuiRunRequest(
-                **{
-                    **default_gui_request().__dict__,
-                    "orbit_count": 1,
-                    "time_step_s": 5.0,
-                    "power_schedule_kind": "custom_intervals",
-                    "custom_intervals_text": "1,2,100",
-                    "internal_heat_w": 5.0,
-                }
-            ),
-            SpacecraftConfigurationId.CUBESAT_3U,
-        )
-        result = run_gui_simulation(request)
-        self.assertTrue(any(math.isclose(t, 1.0, abs_tol=1e-12) for t in result.time_s))
 
 
 class VisualizationProportionTests(unittest.TestCase):

@@ -1,9 +1,10 @@
-"""Checkpoint 6 integrated verification across all five V2 upgrades.
+"""Integrated checks for the simplified simulator.
 
-These tests combine beta, attitude, power schedules, screening scenarios, and
-CubeSat-inspired geometry. They also check discrete Euler energy accounting
-and independent orbital/geometry relations. Passing them demonstrates
-numerical consistency of the educational model — not flight validation.
+These tests combine beta, fixed-inertial attitude, constant internal power,
+and CubeSat-inspired geometry. They also check discrete Euler energy
+accounting and independent orbital/geometry relations. Passing them
+demonstrates numerical consistency of the educational model — not flight
+validation.
 """
 
 from __future__ import annotations
@@ -22,13 +23,11 @@ from satellite_thermal.gui_support import (
     power_schedule_from_request,
     run_environment_comparison_mode,
     run_gui_simulation,
-    run_scenario_comparison_mode,
     run_single_mode,
     temperature_history_csv,
     temperature_metrics_c,
 )
 from satellite_thermal.heat_flows import heat_flow_at_index
-from satellite_thermal.internal_power import PowerScheduleKind
 from satellite_thermal.orbit import (
     EARTH_RADIUS_M,
     GRAVITATIONAL_PARAMETER_M3_PER_S2,
@@ -46,12 +45,6 @@ from satellite_thermal.spacecraft_configurations import (
 )
 from satellite_thermal.spacecraft_geometry import FACE_NAMES, RectangularBusGeometry
 from satellite_thermal.surface_heating import projected_solar_area_m2
-from satellite_thermal.thermal_scenarios import (
-    SCENARIO_CASE_COLD,
-    SCENARIO_CASE_HOT,
-    SCENARIO_CASE_NOMINAL,
-    ThermalScenarioId,
-)
 
 
 def _base_3u_request(**overrides: object) -> GuiRunRequest:
@@ -65,8 +58,7 @@ def _base_3u_request(**overrides: object) -> GuiRunRequest:
         "time_step_s": 5.0,
         "altitude_km": 500.0,
         "beta_deg": 0.0,
-        "attitude_mode": AttitudeMode.NADIR_POINTING.value,
-        "power_schedule_kind": PowerScheduleKind.CONSTANT.value,
+        "attitude_mode": AttitudeMode.FIXED_INERTIAL.value,
         "internal_heat_w": 5.0,
         "include_earth_infrared": True,
         "include_albedo": True,
@@ -136,15 +128,20 @@ class Checkpoint6IntegratedCases(unittest.TestCase):
         )
         self.assertTrue(any(result.in_eclipse))
         self.assertEqual(request.body_height_m, CDS_3U_HEIGHT_M)
-        self.assertEqual(request.attitude_mode, "nadir_pointing")
+        self.assertEqual(request.attitude_mode, "fixed_inertial")
         self.assertAlmostEqual(metrics["initial_c"], 20.0, places=8)
         # Sanity: temperatures remain finite and physically ordered for this case.
         self.assertTrue(math.isfinite(metrics["final_c"]))
         self.assertLessEqual(metrics["minimum_c"], metrics["maximum_c"])
 
     def test_case_b_high_beta_no_eclipse_warmer_than_beta0(self) -> None:
-        low = run_gui_simulation(_base_3u_request(beta_deg=0.0))
-        high = run_gui_simulation(_base_3u_request(beta_deg=75.0))
+        # Legacy fixed-area heating: beta only changes eclipse, not projected area.
+        low = run_gui_simulation(
+            _base_3u_request(beta_deg=0.0, thermal_model="legacy")
+        )
+        high = run_gui_simulation(
+            _base_3u_request(beta_deg=75.0, thermal_model="legacy")
+        )
         beta_c_deg = math.degrees(_independent_critical_beta_rad(500_000.0))
         self.assertGreater(75.0, beta_c_deg)
         self.assertEqual(high.eclipse_duration_s, 0.0)
@@ -155,55 +152,6 @@ class Checkpoint6IntegratedCases(unittest.TestCase):
             temperature_metrics_c(high)["final_c"],
             temperature_metrics_c(low)["final_c"],
         )
-
-    def test_case_c_off_grid_power_event_aware(self) -> None:
-        request = _base_3u_request(
-            power_schedule_kind=PowerScheduleKind.CUSTOM_INTERVALS.value,
-            custom_intervals_text="1,2,100",
-            internal_heat_w=5.0,
-            time_step_s=5.0,
-            orbit_count=1,
-        )
-        result = run_gui_simulation(request)
-        self.assertTrue(any(math.isclose(t, 1.0, abs_tol=1e-12) for t in result.time_s))
-        self.assertTrue(any(math.isclose(t, 2.0, abs_tol=1e-12) for t in result.time_s))
-        schedule = power_schedule_from_request(request)
-        extra = 0.0
-        for index in range(len(result.time_s) - 1):
-            t0 = result.time_s[index]
-            dt = result.time_s[index + 1] - t0
-            q = schedule.power_w_at(t0, result.in_eclipse[index])
-            extra += (q - 5.0) * dt
-        self.assertAlmostEqual(extra, 95.0, places=9)
-
-    def test_case_d_attitude_comparison(self) -> None:
-        finals = {}
-        for attitude in (
-            AttitudeMode.FIXED_INERTIAL.value,
-            AttitudeMode.NADIR_POINTING.value,
-            AttitudeMode.SUN_POINTING.value,
-        ):
-            result = run_gui_simulation(_base_3u_request(attitude_mode=attitude))
-            finals[attitude] = temperature_metrics_c(result)["final_c"]
-        # Different prescribed attitudes must not collapse to identical histories
-        # for a non-cubic 3U bus under the same environment.
-        unique = {round(value, 4) for value in finals.values()}
-        self.assertGreaterEqual(len(unique), 2)
-
-    def test_case_e_screening_scenarios_same_spacecraft(self) -> None:
-        request = _base_3u_request(orbit_count=2, time_step_s=10.0)
-        study = run_scenario_comparison_mode(request)
-        curves = all_curves(study)
-        by_name = {curve.name: curve for curve in curves}
-        self.assertEqual(set(by_name), {SCENARIO_CASE_COLD, SCENARIO_CASE_NOMINAL, SCENARIO_CASE_HOT})
-        for curve in curves:
-            self.assertEqual(curve.request.body_height_m, CDS_3U_HEIGHT_M)
-            self.assertEqual(curve.request.mass_kg, request.mass_kg)
-        cold = temperature_metrics_c(by_name[SCENARIO_CASE_COLD].result)["final_c"]
-        nominal = temperature_metrics_c(by_name[SCENARIO_CASE_NOMINAL].result)["final_c"]
-        hot = temperature_metrics_c(by_name[SCENARIO_CASE_HOT].result)["final_c"]
-        self.assertLess(cold, nominal)
-        self.assertLess(nominal, hot)
 
 
 class Checkpoint6EnergyBalance(unittest.TestCase):
@@ -329,18 +277,20 @@ class Checkpoint6OrbitGeometry(unittest.TestCase):
         self.assertGreater(analytical_eclipse_duration_s(below), 0.0)
         self.assertEqual(analytical_eclipse_duration_s(above), 0.0)
 
-    def test_sun_direction_and_right_handed_attitudes(self) -> None:
+    def test_sun_direction_and_fixed_inertial_axes(self) -> None:
         for beta in (0.0, math.radians(60.0), math.radians(-90.0)):
             sun = sun_direction(beta)
             self.assertAlmostEqual(math.sqrt(sum(v * v for v in sun)), 1.0, places=12)
             self.assertAlmostEqual(sun[0], math.cos(beta), places=12)
             self.assertAlmostEqual(sun[2], math.sin(beta), places=12)
-        # Nadir-pointing triad at theta=0.
         body_x, body_y, body_z = body_axes_inertial(
-            AttitudeMode.NADIR_POINTING,
-            0.0,
+            AttitudeMode.FIXED_INERTIAL,
+            0.4,
             sun_direction(0.0),
         )
+        self.assertEqual(body_x, (1.0, 0.0, 0.0))
+        self.assertEqual(body_y, (0.0, 1.0, 0.0))
+        self.assertEqual(body_z, (0.0, 0.0, 1.0))
         self.assertAlmostEqual(
             body_x[0] * (body_y[1] * body_z[2] - body_y[2] * body_z[1])
             + body_x[1] * (body_y[2] * body_z[0] - body_y[0] * body_z[2])
@@ -348,14 +298,6 @@ class Checkpoint6OrbitGeometry(unittest.TestCase):
             1.0,
             places=12,
         )
-        # Sun-pointing at beta=90° exercises singularity fallback path.
-        sx, sy, sz = body_axes_inertial(
-            AttitudeMode.SUN_POINTING,
-            0.0,
-            sun_direction(math.radians(90.0)),
-        )
-        for axis in (sx, sy, sz):
-            self.assertAlmostEqual(math.sqrt(sum(v * v for v in axis)), 1.0, places=10)
 
     def test_face_areas_independent_of_helper_repeat(self) -> None:
         length, width, height = 0.1, 0.1, 0.3405

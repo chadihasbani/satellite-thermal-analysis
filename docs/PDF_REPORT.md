@@ -17,34 +17,21 @@ the **frozen** completed-run configuration.
 
 ## Contents
 
-1. Cover page (mode, spacecraft, version, date; multi-case runs list each case)
+1. Cover page (mode, spacecraft, version, date)
 2. Executive summary (final / min / max predicted spacecraft temperature)
 3. Spacecraft configuration table
 4. Orbital and environmental conditions
-5. Internal equipment heating schedule (full reproducibility detail)
+5. Constant internal equipment heating
 6. Temperature analysis + history figure
 7. 3D orbital snapshot (Plotly static export via Kaleido)
 8. Heat-flow breakdown at the selected sample
-9. Mode-specific comparison section (omitted for Single Simulation)
+9. Heat-source comparison section (Compare Heat Sources mode only)
 10. Numerical method summary
 11. Assumptions and limitations
 12. Technical references
 
-### Internal power documentation
-
-| Schedule | Report includes |
-| --- | --- |
-| Constant | Actual constant power (W) |
-| Eclipse-reduced | Sunlit power and eclipse power |
-| Periodic | Baseline power, high power, period, high-power duration |
-| Custom | Baseline power plus every interval start, end, and power |
-
-### Comparison meaning
-
-For Reference versus Modified studies, overall temperature differences are
-always **Modified − Reference**. The selected inspection case only affects the
-selected-time snapshot and instantaneous heat-flow panel — not the overall
-comparison sign convention.
+Supported analysis modes in the report: **Satellite Thermal Simulation** and
+**Compare Heat Sources**.
 
 ## Implementation
 

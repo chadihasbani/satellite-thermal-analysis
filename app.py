@@ -9,12 +9,12 @@ from __future__ import annotations
 import streamlit as st
 
 from satellite_thermal.gui_support import (
+    ENV_CASE_A,
+    ENV_CASE_B,
+    ENV_CASE_C,
     GuiRunRequest,
-    SCENARIO_COMPARE_MODE,
     all_curves,
     apply_spacecraft_configuration,
-    apply_thermal_scenario,
-    changed_parameter_rows,
     clamp_sample_index,
     comparison_metrics_rows,
     default_gui_request,
@@ -29,15 +29,10 @@ from satellite_thermal.gui_support import (
     power_schedule_from_request,
     request_fingerprint,
     resolve_inspect_curve,
-    run_baseline_comparison_mode,
     run_environment_comparison_mode,
-    run_scenario_comparison_mode,
     run_single_mode,
-    scenario_comparison_interpretation,
-    scenario_comparison_summary_rows,
     temperature_history_csv,
     temperature_metrics_c,
-    validate_gui_request,
 )
 from satellite_thermal.spacecraft_configurations import (
     SpacecraftConfigurationId,
@@ -46,13 +41,6 @@ from satellite_thermal.spacecraft_configurations import (
     configuration_select_options,
     primary_configuration_select_options,
     sync_session_values_from_configuration,
-)
-from satellite_thermal.thermal_scenarios import (
-    ThermalScenarioId,
-    build_scenario_definition,
-    preset_controls_locked,
-    scenario_select_options,
-    sync_session_values_from_scenario,
 )
 from satellite_thermal.heat_flows import heat_flow_at_index
 from satellite_thermal.orbit import orbital_period_s
@@ -63,6 +51,7 @@ from satellite_thermal.report_pdf import (
     build_engineering_report_pdf,
     ensure_kaleido_browser_configured,
 )
+from satellite_thermal.attitude import AttitudeMode
 
 st.set_page_config(
     page_title="Satellite Thermal Analysis",
@@ -79,51 +68,87 @@ html, body, [class*="css"] {
     font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
 }
 .block-container {
-    padding-top: 2.0rem;
-    padding-bottom: 3.0rem;
-    max-width: 1120px;
+    padding-top: 1.6rem;
+    padding-bottom: 2.75rem;
+    max-width: 1100px;
+}
+section[data-testid="stSidebar"] {
+    padding-top: 0 !important;
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarHeader"] {
+    height: 2.4rem !important;
+    min-height: 2.4rem !important;
+    padding: 0.35rem 0.5rem 0 !important;
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarContent"],
+section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"],
+section[data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] {
+    padding-top: 0 !important;
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+    padding-top: 0.15rem !important;
+}
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3:first-of-type,
+section[data-testid="stSidebar"] .stMarkdown h3:first-of-type {
+    margin-top: 0 !important;
+    margin-bottom: 0.4rem !important;
+    padding-top: 0 !important;
+}
+section[data-testid="stSidebar"] .stMarkdown p {
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: #6E6E73;
+}
+.sta-sidebar-note {
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: #3A3A3C;
+    margin: 0.15rem 0 0.65rem 0;
+}
+@media (max-width: 900px) {
+    .block-container { padding-top: 1.1rem; max-width: 100%; }
+    .sta-state-panel { height: auto !important; min-height: 320px; }
+    .sta-state-grid, .sta-heat-grid { grid-auto-rows: minmax(4.2rem, auto); }
 }
 h1 {
     font-weight: 700 !important;
     letter-spacing: -0.035em !important;
-    font-size: 2.2rem !important;
+    font-size: 2.15rem !important;
     line-height: 1.15 !important;
     color: #1D1D1F !important;
-    margin-bottom: 0.4rem !important;
+    margin-bottom: 0.35rem !important;
 }
 h3 {
     font-weight: 600 !important;
     letter-spacing: -0.02em !important;
     color: #1D1D1F !important;
-    margin-top: 1.4rem !important;
+    margin-top: 1.25rem !important;
 }
 .sta-lede {
     font-size: 1.05rem;
     line-height: 1.5;
     color: #1D1D1F;
-    max-width: 40rem;
     margin: 0 0 0.35rem 0;
 }
 .sta-body {
     font-size: 0.95rem;
-    line-height: 1.5;
+    line-height: 1.55;
     color: #6E6E73;
-    max-width: 42rem;
-    margin: 0 0 1.0rem 0;
+    margin: 0 0 0.85rem 0;
 }
 .sta-section-label {
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     font-weight: 600;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.07em;
     text-transform: uppercase;
     color: #86868B;
-    margin: 0 0 0.35rem 0;
+    margin: 0.4rem 0 0.45rem 0;
 }
 div[data-testid="stMetric"] {
     background: #F5F5F7;
     border: none;
-    border-radius: 12px;
-    padding: 0.65rem 0.85rem;
+    border-radius: 14px;
+    padding: 0.7rem 0.9rem;
 }
 div[data-testid="stMetric"] label {
     color: #6E6E73 !important;
@@ -137,145 +162,165 @@ div[data-testid="stMetric"] [data-testid="stMetricValue"] {
 }
 .sta-state-panel {
     background: #F5F5F7;
-    border-radius: 14px;
-    padding: 1rem 1.1rem 0.85rem 1.1rem;
-    height: 520px;
+    border-radius: 16px;
+    padding: 0.95rem 1rem;
+    height: 560px;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    gap: 0.7rem;
 }
-.sta-state-panel h5 {
-    margin: 0 0 0.55rem 0 !important;
-    font-size: 0.95rem !important;
+.sta-panel-block {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+.sta-panel-block.sta-panel-status { flex: 0.9; }
+.sta-panel-block.sta-panel-heat { flex: 1.35; }
+.sta-state-panel h5,
+.sta-panel-heading {
+    margin: 0 0 0.45rem 0 !important;
+    font-size: 0.82rem !important;
     font-weight: 600 !important;
-    color: #1D1D1F !important;
+    letter-spacing: 0.01em;
+    color: #6E6E73 !important;
 }
 .sta-state-grid {
+    flex: 1;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 0.55rem;
+    grid-template-rows: 1fr 1fr;
+    gap: 0.5rem;
+    min-height: 0;
 }
 .sta-state-card {
     background: #FFFFFF;
-    border-radius: 10px;
-    padding: 0.55rem 0.7rem;
+    border-radius: 12px;
+    padding: 0.65rem 0.75rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 0;
 }
 .sta-state-card .lbl {
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     color: #6E6E73;
-    margin-bottom: 0.15rem;
+    margin-bottom: 0.2rem;
 }
 .sta-state-card .val {
-    font-size: 1.15rem;
+    font-size: 1.12rem;
     font-weight: 600;
     color: #1D1D1F;
     letter-spacing: -0.02em;
 }
-section[data-testid="stSidebar"] {
-    background: #F5F5F7;
-    border-right: 1px solid #E8E8ED;
+.sta-heat-grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    gap: 0.5rem;
+    min-height: 0;
 }
-section[data-testid="stSidebar"] > div:first-child {
-    padding-top: 0.35rem !important;
+.sta-heat-card {
+    background: #FFFFFF;
+    border-radius: 12px;
+    padding: 0.55rem 0.7rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 0;
 }
-section[data-testid="stSidebar"] [data-testid="stSidebarHeader"],
-section[data-testid="stSidebar"] [data-testid="stLogoSpacer"] {
-    display: none !important;
-    height: 0 !important;
-    min-height: 0 !important;
-    padding: 0 !important;
-    margin: 0 !important;
+.sta-heat-card .lbl { font-size: 0.7rem; color: #6E6E73; margin-bottom: 0.15rem; }
+.sta-heat-card .val { font-size: 1.05rem; font-weight: 600; color: #1D1D1F; letter-spacing: -0.02em; }
+.sta-heat-card.sta-heat-net {
+    background: #1D1D1F;
 }
-div[data-testid="stSidebarNav"] { display: none; }
-.stButton > button[kind="primary"] {
-    border-radius: 10px !important;
-    font-weight: 600 !important;
-    padding: 0.55rem 1.1rem !important;
+.sta-heat-card.sta-heat-net .lbl { color: #A1A1A6; }
+.sta-heat-card.sta-heat-net .val { color: #FFFFFF; }
+div[data-testid="stSidebar"] .stButton button[kind="primary"] {
+    background: #1D1D1F !important;
+    border: none !important;
 }
-.stButton > button {
-    border-radius: 10px !important;
-}
-hr { border: none; border-top: 1px solid #E8E8ED; margin: 1.2rem 0; }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
+MODE_LABELS = {
+    "single": "Satellite Thermal Simulation",
+    "environment_compare": "Compare Heat Sources",
+}
+
 TERM_HELP = {
-    "alpha": (
-        "Solar absorptivity (α): fraction of incoming sunlight absorbed by a surface."
+    "spacecraft_configuration": (
+        "Preset spacecraft. Reference Satellite uses the Version 1 fixed-area "
+        "legacy model. 1U/3U CubeSats use CDS Rev 14.1 envelope sizes with "
+        "face-based (enhanced) solar heating. Custom lets you edit all fields."
     ),
-    "epsilon": (
-        "Infrared emissivity (ε): how effectively a surface radiates heat. "
-        "This model sets infrared absorptivity equal to ε."
-    ),
-    "areas": (
-        "Effective areas used by the simplified model — not detailed CAD surfaces."
-    ),
-    "earth_ir": (
-        "Earth infrared radiation: heat radiated by Earth toward the spacecraft."
-    ),
-    "albedo": "Albedo: sunlight reflected from Earth toward the spacecraft.",
-    "time_step": (
-        "Time step: how often the temperature is updated. Smaller steps resolve "
-        "eclipses more finely."
-    ),
-    "olr": (
-        "Earth infrared intensity (outgoing longwave radiation) used for "
-        "planetshine heating."
-    ),
-    "internal": (
-        "Internal heating: heat generated by the satellite’s own equipment (≥ 0 W)."
-    ),
-    "radiative": "Radiative cooling: heat the spacecraft loses by radiating to space.",
-    "single_node": (
-        "Single-node model: the whole spacecraft is represented by one temperature."
-    ),
-    "eclipse": (
-        "Eclipse: when Earth blocks direct sunlight from reaching the spacecraft."
+    "altitude": (
+        "Orbital altitude above Earth’s surface (km). Higher orbits have longer "
+        "periods and usually shorter eclipses. Used for circular-orbit timing "
+        "and the cylindrical eclipse model."
     ),
     "beta": (
-        "Sun–orbit angle (β): angle between the Sun direction and the orbital plane. "
-        "β = 0° gives the longest eclipse; large |β| can mean continuous sunlight."
+        "Sun–orbit angle β (°): angle between the Sun direction and the orbital "
+        "plane. β = 0° gives the longest eclipse; large |β| can mean continuous "
+        "sunlight under this model."
     ),
+    "mode": (
+        "Satellite Thermal Simulation runs one configured case. Compare Heat "
+        "Sources compares environmental heating: sunlight only, then +Earth "
+        "infrared, then +Earth infrared and albedo. Constant internal heating "
+        "and radiative cooling are included in every case."
+    ),
+    "internal": (
+        "Heat generated by onboard electronics and equipment. The default is "
+        "5 W for the reference spacecraft, but you can change it to investigate "
+        "different operating conditions. The default is illustrative, not a "
+        "measured or mission-validated value. Internal heating is assumed "
+        "constant throughout the simulation."
+    ),
+    "inspect_case": (
+        "Select which heating case to examine in detail. All three temperature "
+        "histories remain on the graph; this selection controls the spacecraft "
+        "temperature, orbital view, selected-time values, and heat-flow analysis "
+        "shown below."
+    ),
+    "mass": "Spacecraft mass (kg). With specific heat, sets thermal capacitance m·cp.",
+    "cp": (
+        "Effective specific heat capacity (J/(kg·K)). Educational lumped value, "
+        "not a material datasheet for every component."
+    ),
+    "t0": "Initial uniform spacecraft temperature (°C) at the start of the run.",
+    "alpha": (
+        "Solar absorptivity α (0–1). Fraction of incident sunlight absorbed. "
+        "Higher α increases solar heating."
+    ),
+    "epsilon": (
+        "Infrared emissivity ε (0–1). Controls radiative cooling. Infrared "
+        "absorptivity for Earth IR uses Kirchhoff’s law (α_IR = ε)."
+    ),
+    "areas": (
+        "Effective areas (m²) used by the legacy heating path and for Earth IR / "
+        "albedo loads in both models. Enhanced solar heating uses face geometry "
+        "instead of projected solar area."
+    ),
+    "dims": "Bus length, width, and height (m) for enhanced face-based solar heating and the 3D view.",
     "thermal_model": (
-        "Legacy uses fixed projected and radiating areas (Version 1.0 reference). "
-        "Enhanced uses six bus faces with a chosen orientation for solar heating."
+        "Legacy: fixed projected and radiating areas (Version 1 reference). "
+        "Enhanced: six bus faces with fixed inertial orientation for solar heating."
     ),
-    "attitude": (
-        "Orientation used for face-based solar heating (enhanced model). "
-        "Engineering terms: fixed inertial, nadir-pointing (LVLH), or Sun-pointing. "
-        "This is a prescribed geometry, not a closed-loop attitude controller."
+    "solar": "Solar irradiance S at the spacecraft (W/m²). Typical LEO value ≈ 1361.",
+    "olr": "Earth outgoing longwave radiation intensity (W/m²) for Earth infrared heating.",
+    "albedo": "Earth Bond albedo (0–1). Fraction of sunlight reflected by Earth.",
+    "time_step": (
+        "Nominal integrator time step (s). Smaller steps resolve eclipse edges more "
+        "finely but create more samples."
     ),
-    "power_schedule": (
-        "Internal heating over time. Constant uses a fixed wattage. Other options "
-        "are illustrative educational schedules, not a real power budget."
+    "single_node": (
+        "Single-node model: the whole spacecraft is one uniform temperature. "
+        "Component-level gradients are not resolved."
     ),
-    "thermal_scenario": (
-        "Environmental condition presets set sunlight strength, Earth reflection, "
-        "Earth infrared intensity, Sun–orbit angle, and constant internal heating. "
-        "Hot / Cold / Normal are educational screening cases, not universal "
-        "spacecraft worst cases. Custom uses the values you enter."
-    ),
-    "spacecraft_configuration": (
-        "Spacecraft presets set size, mass, heat capacity, surface properties, and "
-        "calculation method. CubeSat sizes follow CDS Rev 14.1 envelopes; masses "
-        "are illustrative. Visual solar wings are decoration only."
-    ),
-}
-
-MODE_LABELS = {
-    "single": "Single Simulation",
-    "baseline_compare": "Compare Configurations",
-    "environment_compare": "Compare Heat Sources",
-    "scenario_compare": "Compare Conditions",
-}
-
-ATTITUDE_LABELS = {
-    "fixed_inertial": "Fixed orientation",
-    "nadir_pointing": "Earth-facing",
-    "sun_pointing": "Sun-facing",
 }
 
 
@@ -292,10 +337,6 @@ def _init_state() -> None:
         st.session_state.gui_mode = "single"
     if "inspect_case_name" not in st.session_state:
         st.session_state.inspect_case_name = None
-    if "gui_thermal_scenario" not in st.session_state:
-        st.session_state.gui_thermal_scenario = ThermalScenarioId.CUSTOM.value
-    if "_scenario_sync_id" not in st.session_state:
-        st.session_state._scenario_sync_id = st.session_state.gui_thermal_scenario
     if "gui_spacecraft_configuration" not in st.session_state:
         st.session_state.gui_spacecraft_configuration = (
             SpacecraftConfigurationId.LEGACY_SIMPLIFIED.value
@@ -305,7 +346,7 @@ def _init_state() -> None:
         key = f"gui_{field}"
         if key not in st.session_state:
             st.session_state[key] = value
-    # Force one configuration sync on first load so locked preset fields match.
+    st.session_state.gui_attitude_mode = AttitudeMode.FIXED_INERTIAL.value
     if "_configuration_sync_id" not in st.session_state:
         updates = sync_session_values_from_configuration(
             st.session_state.gui_spacecraft_configuration
@@ -317,12 +358,19 @@ def _init_state() -> None:
         )
 
 
+def _prepare_new_run() -> None:
+    """Reset inspection to Case A before widgets render (Streamlit callback)."""
+    run_id = int(st.session_state.get("inspect_run_id", 0)) + 1
+    st.session_state.inspect_run_id = run_id
+    st.session_state.inspect_case_name = ENV_CASE_A
+    st.session_state[f"inspect_case_{run_id}"] = ENV_CASE_A
+    st.session_state.sample_index = 0
+
+
 def _apply_defaults() -> None:
     defaults = default_gui_request()
     for field, value in defaults.__dict__.items():
         st.session_state[f"gui_{field}"] = value
-    st.session_state.gui_thermal_scenario = ThermalScenarioId.CUSTOM.value
-    st.session_state._scenario_sync_id = ThermalScenarioId.CUSTOM.value
     st.session_state.gui_spacecraft_configuration = (
         SpacecraftConfigurationId.LEGACY_SIMPLIFIED.value
     )
@@ -335,24 +383,19 @@ def _apply_defaults() -> None:
         SpacecraftConfigurationId.LEGACY_SIMPLIFIED.value
     )
     st.session_state.gui_mode = "single"
+    st.session_state.gui_attitude_mode = AttitudeMode.FIXED_INERTIAL.value
+    st.session_state.inspect_case_name = ENV_CASE_A
 
 
-def _mode_blurb(mode: str) -> str:
-    return {
-        "single": "Simulate one satellite with the settings you choose.",
-        "baseline_compare": (
-            "Compare your settings with the repository reference defaults "
-            "(same number of orbits and time step)."
-        ),
-        "environment_compare": (
-            "Compare the same satellite with sunlight only, then add Earth "
-            "infrared, then add reflected sunlight (albedo)."
-        ),
-        "scenario_compare": (
-            "Compare cold, normal, and hot environmental screening cases on "
-            "the same satellite."
-        ),
-    }[mode]
+def _apply_enhanced_cube() -> None:
+    """Switch to the illustrative enhanced cube via button callback."""
+    cube_id = SpacecraftConfigurationId.ILLUSTRATIVE_CUBE.value
+    st.session_state.gui_spacecraft_configuration = cube_id
+    updates = sync_session_values_from_configuration(cube_id)
+    for key, value in updates.items():
+        st.session_state[key] = value
+    st.session_state._configuration_sync_id = cube_id
+    st.session_state.gui_attitude_mode = AttitudeMode.FIXED_INERTIAL.value
 
 
 def _request_from_state() -> GuiRunRequest:
@@ -377,61 +420,28 @@ def _request_from_state() -> GuiRunRequest:
         include_earth_infrared=bool(st.session_state.gui_include_earth_infrared),
         include_albedo=bool(st.session_state.gui_include_albedo),
         thermal_model=str(st.session_state.gui_thermal_model),
-        attitude_mode=str(st.session_state.gui_attitude_mode),
+        attitude_mode=AttitudeMode.FIXED_INERTIAL.value,
         body_length_m=float(st.session_state.gui_body_length_m),
         body_width_m=float(st.session_state.gui_body_width_m),
         body_height_m=float(st.session_state.gui_body_height_m),
-        power_schedule_kind=str(st.session_state.gui_power_schedule_kind),
-        standby_power_w=float(st.session_state.gui_standby_power_w),
-        nominal_power_w=float(st.session_state.gui_nominal_power_w),
-        high_power_w=float(st.session_state.gui_high_power_w),
-        periodic_period_s=float(st.session_state.gui_periodic_period_s),
-        periodic_high_duration_s=float(st.session_state.gui_periodic_high_duration_s),
-        custom_intervals_text=str(st.session_state.gui_custom_intervals_text),
     )
 
 
-def _run_study(mode: str, request: GuiRunRequest, scenario_id: str):
-    del scenario_id
-    if mode == SCENARIO_COMPARE_MODE:
-        validate_gui_request(apply_thermal_scenario(request, ThermalScenarioId.NOMINAL))
-        return run_scenario_comparison_mode(request)
-    validate_gui_request(request)
-    if mode == "single":
-        return run_single_mode(request)
-    if mode == "baseline_compare":
-        return run_baseline_comparison_mode(request)
-    return run_environment_comparison_mode(request)
+def _run_study(mode: str, request: GuiRunRequest):
+    if mode == "environment_compare":
+        return run_environment_comparison_mode(request)
+    return run_single_mode(request)
 
 
 def _sync_configuration(configuration_id: str) -> bool:
-    """Apply preset field sync when the spacecraft selection changes."""
     config_locked = configuration_controls_locked(configuration_id)
     if configuration_id != st.session_state.get("_configuration_sync_id"):
         updates = sync_session_values_from_configuration(configuration_id)
         for key, value in updates.items():
             st.session_state[key] = value
         st.session_state._configuration_sync_id = configuration_id
+        st.session_state.gui_attitude_mode = AttitudeMode.FIXED_INERTIAL.value
     return config_locked
-
-
-def _sync_scenario(mode: str, scenario_id: str) -> None:
-    """Keep Hot/Cold/Normal locked fields aligned with altitude."""
-    if mode != "scenario_compare" and scenario_id != ThermalScenarioId.CUSTOM.value:
-        altitude_now = float(st.session_state.gui_altitude_km)
-        needs_sync = (
-            scenario_id != st.session_state.get("_scenario_sync_id")
-            or altitude_now
-            != float(st.session_state.get("_scenario_sync_altitude_km", -1.0))
-        )
-        if needs_sync:
-            updates = sync_session_values_from_scenario(scenario_id, altitude_now)
-            for key, value in updates.items():
-                st.session_state[key] = value
-            st.session_state._scenario_sync_id = scenario_id
-            st.session_state._scenario_sync_altitude_km = altitude_now
-    elif mode != "scenario_compare" and scenario_id == ThermalScenarioId.CUSTOM.value:
-        st.session_state._scenario_sync_id = ThermalScenarioId.CUSTOM.value
 
 
 _init_state()
@@ -439,34 +449,32 @@ _init_state()
 # --- Header ---
 st.title("Satellite Thermal Analysis")
 st.markdown(
-    '<p class="sta-lede">Explore how a satellite’s temperature changes as it orbits Earth.</p>',
+    '<p class="sta-lede">Predict spacecraft temperature through sunlight and eclipse '
+    "in low Earth orbit.</p>",
     unsafe_allow_html=True,
 )
 st.markdown(
-    '<p class="sta-body">This simulator models heating from sunlight, Earth’s infrared '
-    "radiation, reflected sunlight, and onboard equipment, alongside cooling through "
-    "thermal radiation. Choose a spacecraft, set its orbit and orientation, compare "
-    f"scenarios, and download an engineering PDF report. {TERM_HELP['single_node']}</p>",
+    '<p class="sta-body">This educational single-node model balances heating from the '
+    "Sun, Earth infrared, reflected sunlight, and onboard equipment against radiative "
+    "cooling to space. Configure the spacecraft and orbit, compare heat sources, and "
+    f"download an engineering PDF report. {TERM_HELP['single_node']}</p>",
     unsafe_allow_html=True,
 )
 st.markdown(
     f'<p class="sta-body" style="font-size:0.88rem;color:#86868B;">'
-    f"Version {SIMULATOR_VERSION} · Built with Python, Streamlit, Matplotlib, and Plotly · "
-    "Developed with AI-assisted tooling (Cursor) under human engineering review · "
-    "Git-tracked open-source project</p>",
+    f"Version {SIMULATOR_VERSION} · Python · Streamlit · Matplotlib · Plotly · "
+    "Open-source · Reviewed engineering model</p>",
     unsafe_allow_html=True,
 )
 
 # --- Sidebar ---
 with st.sidebar:
-    # ----- Spacecraft -----
     st.markdown("### Spacecraft")
     primary_options = primary_configuration_select_options()
     all_options = configuration_select_options()
     all_labels = {item[0]: item[1] for item in all_options}
     primary_ids = [item[0] for item in primary_options]
     current_config = str(st.session_state.gui_spacecraft_configuration)
-    # Keep the widget valid if Advanced selected the enhanced cube.
     spacecraft_options = list(primary_ids)
     if current_config not in spacecraft_options:
         spacecraft_options.append(current_config)
@@ -480,27 +488,12 @@ with st.sidebar:
     )
     config_locked = _sync_configuration(configuration_id)
     if configuration_id == SpacecraftConfigurationId.LEGACY_SIMPLIFIED.value:
-        st.caption("Version 1.0 educational reference (fixed-area heating model).")
+        st.caption("Version 1 educational reference (fixed-area legacy model).")
     elif configuration_id == SpacecraftConfigurationId.ILLUSTRATIVE_CUBE.value:
         st.caption("Same size class as the reference, with face-based solar heating.")
     elif configuration_id != SpacecraftConfigurationId.CUSTOM.value:
         st.caption(build_spacecraft_configuration(configuration_id).summary)
 
-    st.selectbox(
-        "Spacecraft orientation",
-        options=["fixed_inertial", "nadir_pointing", "sun_pointing"],
-        format_func=lambda value: ATTITUDE_LABELS[value],
-        key="gui_attitude_mode",
-        help=TERM_HELP["attitude"],
-        disabled=st.session_state.get("gui_thermal_model", "legacy") == "legacy",
-    )
-    if st.session_state.get("gui_thermal_model", "legacy") == "legacy":
-        st.caption(
-            "Orientation affects face-based (enhanced) heating. "
-            "The Reference Satellite uses the legacy fixed-area model."
-        )
-
-    # ----- Orbit -----
     st.markdown("### Orbit")
     st.number_input(
         "Orbital altitude (km)",
@@ -508,17 +501,8 @@ with st.sidebar:
         max_value=2000.0,
         step=50.0,
         key="gui_altitude_km",
-        help="Height above Earth’s surface. Affects orbit period and eclipse length.",
+        help=TERM_HELP["altitude"],
     )
-    # Scenario sync needs altitude before beta is shown as locked.
-    # Scenario id is read early for locking; Advanced owns the selector widget.
-    _early_scenario_id = str(
-        st.session_state.get("gui_thermal_scenario", ThermalScenarioId.CUSTOM.value)
-    )
-    _early_mode = str(st.session_state.get("gui_mode", "single"))
-    _sync_scenario(_early_mode, _early_scenario_id)
-    preset_locked = preset_controls_locked(_early_scenario_id, mode=_early_mode)
-
     st.slider(
         "Sun–orbit angle (β)",
         min_value=-90.0,
@@ -526,23 +510,32 @@ with st.sidebar:
         step=1.0,
         key="gui_beta_deg",
         help=TERM_HELP["beta"],
-        disabled=preset_locked,
     )
 
-    # ----- Simulation -----
     st.markdown("### Simulation")
     mode = st.selectbox(
-        "Simulation mode",
-        options=[
-            "single",
-            "baseline_compare",
-            "environment_compare",
-            "scenario_compare",
-        ],
+        "Analysis mode",
+        options=["single", "environment_compare"],
         format_func=lambda value: MODE_LABELS[value],
         key="gui_mode",
+        help=TERM_HELP["mode"],
     )
-    st.caption(_mode_blurb(mode))
+    if mode == "single":
+        st.markdown(
+            '<p class="sta-sidebar-note">One spacecraft and orbit — temperature, '
+            "heat flows, and 3D view.</p>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<p class="sta-sidebar-note">Compare how environmental heat sources '
+            "affect spacecraft temperature. The same spacecraft is simulated under "
+            "three conditions: direct sunlight only, sunlight plus Earth's infrared "
+            "radiation, and both sources plus reflected sunlight (albedo). Constant "
+            "internal heating and radiative cooling are included in all three "
+            "cases.</p>",
+            unsafe_allow_html=True,
+        )
     st.number_input(
         "Number of orbits",
         1,
@@ -551,457 +544,224 @@ with st.sidebar:
         key="gui_orbit_count",
         help="How many full revolutions around Earth to simulate.",
     )
-
-    run_clicked = st.button("Run Simulation", type="primary", use_container_width=True)
-    st.button(
-        "Reset to defaults",
-        use_container_width=True,
-        on_click=_apply_defaults,
+    st.number_input(
+        "Internal heat dissipation (W)",
+        min_value=0.0,
+        max_value=500.0,
+        step=0.5,
+        key="gui_internal_heat_w",
+        help=TERM_HELP["internal"],
     )
 
-    # ----- Advanced -----
-    with st.expander("Advanced Settings", expanded=False):
-        st.caption("Detailed inputs for experienced users. Defaults are already set.")
+    run_clicked = st.button(
+        "Run Simulation",
+        type="primary",
+        use_container_width=True,
+        on_click=_prepare_new_run,
+    )
+    st.button("Reset to defaults", use_container_width=True, on_click=_apply_defaults)
 
-        # Enhanced cube access (kept out of the primary four choices).
-        if st.button(
+    with st.expander("Advanced settings", expanded=False):
+        st.caption("Secondary inputs. Presets lock geometry and optics until you choose Custom.")
+        st.button(
             "Use Enhanced 0.1 m cube",
             use_container_width=True,
+            on_click=_apply_enhanced_cube,
             help=(
                 "Switch to the enhanced face-based model on a 0.1 m cube "
                 "(same size class as the Reference Satellite)."
             ),
-        ):
-            st.session_state.gui_spacecraft_configuration = (
-                SpacecraftConfigurationId.ILLUSTRATIVE_CUBE.value
-            )
-            updates = sync_session_values_from_configuration(
-                SpacecraftConfigurationId.ILLUSTRATIVE_CUBE.value
-            )
-            for key, value in updates.items():
-                st.session_state[key] = value
-            st.session_state._configuration_sync_id = (
-                SpacecraftConfigurationId.ILLUSTRATIVE_CUBE.value
-            )
-            st.rerun()
-
-        st.markdown("##### Environmental conditions")
-        scenario_options = scenario_select_options()
-        scenario_ids = [item[0] for item in scenario_options]
-        scenario_labels = {item[0]: item[1] for item in scenario_options}
-        scenario_selector_disabled = mode == "scenario_compare"
-        scenario_id = st.selectbox(
-            "Condition preset",
-            options=scenario_ids,
-            format_func=lambda value: scenario_labels[value],
-            key="gui_thermal_scenario",
-            help=TERM_HELP["thermal_scenario"],
-            disabled=scenario_selector_disabled,
         )
-        if scenario_selector_disabled:
-            st.caption(
-                "Compare Conditions always runs Cold, Normal, and Hot together. "
-                "This preset selector is unused in that mode."
-            )
-        # Re-sync after the scenario widget (and any altitude change) is known.
-        _sync_scenario(mode, scenario_id)
-        preset_locked = preset_controls_locked(scenario_id, mode=mode)
-        if mode != "scenario_compare" and scenario_id != ThermalScenarioId.CUSTOM.value:
-            definition = build_scenario_definition(
-                scenario_id,
-                altitude_km=float(st.session_state.gui_altitude_km),
-            )
-            st.caption(definition.summary)
-
-        st.markdown("##### Calculation method")
         st.selectbox(
             "Thermal model",
             options=["legacy", "enhanced"],
             format_func=lambda value: (
                 "Legacy (fixed areas, V1 reference)"
                 if value == "legacy"
-                else "Enhanced (face solar + orientation)"
+                else "Enhanced (face-based solar)"
             ),
             key="gui_thermal_model",
             help=TERM_HELP["thermal_model"],
             disabled=config_locked,
         )
-
-        st.markdown("##### Mass and heat capacity")
-        st.number_input(
-            "Mass (kg)",
-            min_value=0.1,
-            step=0.5,
-            key="gui_mass_kg",
-            disabled=config_locked,
-        )
-        st.number_input(
-            "Specific heat (J/(kg·K))",
-            min_value=1.0,
-            step=50.0,
-            key="gui_specific_heat_j_per_kg_k",
-            disabled=config_locked,
-            help="Effective heat capacity of the whole satellite, not one material alone.",
-        )
-        st.number_input(
-            "Initial temperature (°C)",
-            min_value=-273.14,
-            step=1.0,
-            key="gui_initial_temperature_c",
-            help="Starting temperature. Must stay above absolute zero (−273.15 °C).",
-        )
+        c1, c2 = st.columns(2)
+        with c1:
+            st.number_input(
+                "Mass (kg)",
+                min_value=0.01,
+                step=0.1,
+                key="gui_mass_kg",
+                help=TERM_HELP["mass"],
+                disabled=config_locked,
+            )
+            st.number_input(
+                "Initial temperature (°C)",
+                step=1.0,
+                key="gui_initial_temperature_c",
+                help=TERM_HELP["t0"],
+            )
+        with c2:
+            st.number_input(
+                "Specific heat (J/(kg·K))",
+                min_value=1.0,
+                step=10.0,
+                key="gui_specific_heat_j_per_kg_k",
+                help=TERM_HELP["cp"],
+                disabled=config_locked,
+            )
+            st.number_input(
+                "Time step (s)",
+                min_value=0.5,
+                max_value=60.0,
+                step=1.0,
+                key="gui_time_step_s",
+                help=TERM_HELP["time_step"],
+            )
 
         st.markdown("##### Dimensions")
-        st.number_input(
-            "Length (m)",
-            min_value=1e-3,
-            step=0.01,
-            format="%.4f",
-            key="gui_body_length_m",
-            disabled=config_locked,
-        )
-        st.number_input(
-            "Width (m)",
-            min_value=1e-3,
-            step=0.01,
-            format="%.4f",
-            key="gui_body_width_m",
-            disabled=config_locked,
-        )
-        st.number_input(
-            "Height (m)",
-            min_value=1e-3,
-            step=0.01,
-            format="%.4f",
-            key="gui_body_height_m",
-            disabled=config_locked,
-        )
-        st.number_input(
-            "Projected solar area (m²)",
-            min_value=1e-4,
-            format="%.5f",
-            key="gui_projected_area_m2",
-            help=TERM_HELP["areas"] + " Used in legacy mode only.",
-            disabled=config_locked,
-        )
-        st.number_input(
-            "Radiating area (m²)",
-            min_value=1e-4,
-            format="%.5f",
-            key="gui_radiating_area_m2",
-            help=TERM_HELP["areas"],
-            disabled=config_locked,
-        )
-        st.number_input(
-            "Earth-facing area (m²)",
-            min_value=1e-4,
-            format="%.5f",
-            key="gui_earth_facing_area_m2",
-            help=TERM_HELP["areas"],
-            disabled=config_locked,
-        )
-        st.number_input(
-            "Albedo area (m²)",
-            min_value=1e-4,
-            format="%.5f",
-            key="gui_albedo_area_m2",
-            help=TERM_HELP["areas"],
-            disabled=config_locked,
-        )
+        d1, d2, d3 = st.columns(3)
+        with d1:
+            st.number_input(
+                "Length (m)",
+                min_value=0.01,
+                step=0.01,
+                format="%.4f",
+                key="gui_body_length_m",
+                help=TERM_HELP["dims"],
+                disabled=config_locked,
+            )
+        with d2:
+            st.number_input(
+                "Width (m)",
+                min_value=0.01,
+                step=0.01,
+                format="%.4f",
+                key="gui_body_width_m",
+                help=TERM_HELP["dims"],
+                disabled=config_locked,
+            )
+        with d3:
+            st.number_input(
+                "Height (m)",
+                min_value=0.01,
+                step=0.01,
+                format="%.4f",
+                key="gui_body_height_m",
+                help=TERM_HELP["dims"],
+                disabled=config_locked,
+            )
 
-        st.markdown("##### Surface properties")
-        st.slider(
-            "Solar absorptivity α",
-            min_value=0.0,
-            max_value=1.0,
-            step=0.01,
-            key="gui_absorptivity",
-            help=TERM_HELP["alpha"],
-            disabled=config_locked,
-        )
-        st.slider(
-            "Infrared emissivity ε",
-            min_value=0.0,
-            max_value=1.0,
-            step=0.01,
-            key="gui_emissivity",
-            help=TERM_HELP["epsilon"],
-            disabled=config_locked,
-        )
+        st.markdown("##### Optical properties")
+        o1, o2 = st.columns(2)
+        with o1:
+            st.number_input(
+                "Solar absorptivity α",
+                min_value=0.0,
+                max_value=1.0,
+                step=0.01,
+                key="gui_absorptivity",
+                help=TERM_HELP["alpha"],
+                disabled=config_locked,
+            )
+        with o2:
+            st.number_input(
+                "Infrared emissivity ε",
+                min_value=0.0,
+                max_value=1.0,
+                step=0.01,
+                key="gui_emissivity",
+                help=TERM_HELP["epsilon"],
+                disabled=config_locked,
+            )
+
+        st.markdown("##### Effective areas")
+        a1, a2 = st.columns(2)
+        with a1:
+            st.number_input(
+                "Projected solar area (m²)",
+                min_value=1e-6,
+                format="%.5f",
+                key="gui_projected_area_m2",
+                help=TERM_HELP["areas"],
+                disabled=config_locked,
+            )
+            st.number_input(
+                "Earth-facing area (m²)",
+                min_value=1e-6,
+                format="%.5f",
+                key="gui_earth_facing_area_m2",
+                help=TERM_HELP["areas"],
+                disabled=config_locked,
+            )
+        with a2:
+            st.number_input(
+                "Radiating area (m²)",
+                min_value=1e-6,
+                format="%.5f",
+                key="gui_radiating_area_m2",
+                help=TERM_HELP["areas"],
+                disabled=config_locked,
+            )
+            st.number_input(
+                "Albedo area (m²)",
+                min_value=1e-6,
+                format="%.5f",
+                key="gui_albedo_area_m2",
+                help=TERM_HELP["areas"],
+                disabled=config_locked,
+            )
 
         st.markdown("##### Environment")
-        env_flag_locked = preset_locked or mode == "environment_compare"
-        if mode != "environment_compare":
-            st.checkbox(
-                "Include Earth infrared",
-                key="gui_include_earth_infrared",
-                help=TERM_HELP["earth_ir"],
-                disabled=env_flag_locked,
-            )
-            st.checkbox(
-                "Include albedo (reflected sunlight)",
-                key="gui_include_albedo",
-                help=TERM_HELP["albedo"],
-                disabled=env_flag_locked,
-            )
-        else:
-            # Keep widgets registered so session state stays valid.
-            st.checkbox(
-                "Include Earth infrared",
-                key="gui_include_earth_infrared",
-                help=TERM_HELP["earth_ir"],
-                disabled=True,
-            )
-            st.checkbox(
-                "Include albedo (reflected sunlight)",
-                key="gui_include_albedo",
-                help=TERM_HELP["albedo"],
-                disabled=True,
-            )
+        if mode == "environment_compare":
             st.caption(
-                "In Compare Heat Sources, these flags are set by each case "
-                "(sunlight only → +Earth IR → +albedo)."
+                "Compare Heat Sources controls Earth IR and albedo per case. "
+                "Solar irradiance and OLR below still apply."
             )
-
-        if mode != "scenario_compare":
-            st.number_input(
-                "Solar irradiance (W/m²)",
-                min_value=0.0,
-                step=1.0,
-                key="gui_solar_flux_w_per_m2",
-                disabled=preset_locked,
-                help="Strength of sunlight at the spacecraft.",
-            )
-            st.number_input(
-                "Earth infrared intensity (W/m²)",
-                min_value=0.0,
-                step=1.0,
-                key="gui_earth_olr_w_per_m2",
+            st.session_state.gui_include_earth_infrared = True
+            st.session_state.gui_include_albedo = True
+        else:
+            st.checkbox(
+                "Include Earth infrared",
+                key="gui_include_earth_infrared",
                 help=TERM_HELP["olr"],
-                disabled=preset_locked,
             )
-            st.slider(
-                "Earth Bond albedo",
-                min_value=0.0,
-                max_value=1.0,
-                step=0.01,
-                key="gui_earth_bond_albedo",
+            st.checkbox(
+                "Include Earth-reflected sunlight (albedo)",
+                key="gui_include_albedo",
                 help=TERM_HELP["albedo"],
-                disabled=preset_locked,
             )
-        else:
-            # Register widgets while Compare Conditions owns these values.
-            st.number_input(
-                "Solar irradiance (W/m²)",
-                min_value=0.0,
-                step=1.0,
-                key="gui_solar_flux_w_per_m2",
-                disabled=True,
-            )
-            st.number_input(
-                "Earth infrared intensity (W/m²)",
-                min_value=0.0,
-                step=1.0,
-                key="gui_earth_olr_w_per_m2",
-                disabled=True,
-            )
-            st.slider(
-                "Earth Bond albedo",
-                min_value=0.0,
-                max_value=1.0,
-                step=0.01,
-                key="gui_earth_bond_albedo",
-                disabled=True,
-            )
-            st.caption(
-                "Compare Conditions applies its own Cold / Normal / Hot "
-                "environment values to each curve."
-            )
-
-        st.markdown("##### Internal heating")
-        if mode != "scenario_compare":
-            st.number_input(
-                "Internal heat (W)",
-                min_value=0.0,
-                step=1.0,
-                key="gui_internal_heat_w",
-                help=TERM_HELP["internal"],
-                disabled=preset_locked,
-            )
-            st.selectbox(
-                "Heating schedule",
-                options=[
-                    "constant",
-                    "eclipse_reduced",
-                    "periodic_high",
-                    "custom_intervals",
-                ],
-                format_func=lambda value: {
-                    "constant": "Constant",
-                    "eclipse_reduced": "Reduced in eclipse",
-                    "periodic_high": "Periodic high-power pulses",
-                    "custom_intervals": "Custom time intervals",
-                }[value],
-                key="gui_power_schedule_kind",
-                help=TERM_HELP["power_schedule"],
-                disabled=preset_locked,
-            )
-            schedule_kind = str(st.session_state.gui_power_schedule_kind)
-            if schedule_kind != "constant":
-                st.number_input(
-                    "Standby power (W)",
-                    min_value=0.0,
-                    step=0.5,
-                    key="gui_standby_power_w",
-                )
-                st.number_input(
-                    "Nominal power (W)",
-                    min_value=0.0,
-                    step=0.5,
-                    key="gui_nominal_power_w",
-                )
-                st.number_input(
-                    "High power (W)",
-                    min_value=0.0,
-                    step=0.5,
-                    key="gui_high_power_w",
-                )
-            else:
-                # Keep schedule fields in session state without showing them.
-                st.session_state.setdefault("gui_standby_power_w", default_gui_request().standby_power_w)
-                st.session_state.setdefault("gui_nominal_power_w", default_gui_request().nominal_power_w)
-                st.session_state.setdefault("gui_high_power_w", default_gui_request().high_power_w)
-
-            if schedule_kind == "periodic_high":
-                st.number_input(
-                    "Pulse period (s)",
-                    min_value=1.0,
-                    step=60.0,
-                    key="gui_periodic_period_s",
-                )
-                st.number_input(
-                    "Pulse duration (s)",
-                    min_value=0.0,
-                    step=30.0,
-                    key="gui_periodic_high_duration_s",
-                )
-            else:
-                st.session_state.setdefault(
-                    "gui_periodic_period_s", default_gui_request().periodic_period_s
-                )
-                st.session_state.setdefault(
-                    "gui_periodic_high_duration_s",
-                    default_gui_request().periodic_high_duration_s,
-                )
-
-            if schedule_kind == "custom_intervals":
-                st.text_area(
-                    "Custom intervals (start_s, end_s, power_w)",
-                    key="gui_custom_intervals_text",
-                    height=80,
-                    help="Example: 0,120,10; 300,400,25. Outside intervals, Internal heat applies.",
-                )
-            else:
-                st.session_state.setdefault("gui_custom_intervals_text", "")
-        else:
-            st.number_input(
-                "Internal heat (W)",
-                min_value=0.0,
-                step=1.0,
-                key="gui_internal_heat_w",
-                disabled=True,
-            )
-            st.selectbox(
-                "Heating schedule",
-                options=[
-                    "constant",
-                    "eclipse_reduced",
-                    "periodic_high",
-                    "custom_intervals",
-                ],
-                format_func=lambda value: {
-                    "constant": "Constant",
-                    "eclipse_reduced": "Reduced in eclipse",
-                    "periodic_high": "Periodic high-power pulses",
-                    "custom_intervals": "Custom time intervals",
-                }[value],
-                key="gui_power_schedule_kind",
-                disabled=True,
-            )
-            st.number_input(
-                "Standby power (W)",
-                min_value=0.0,
-                step=0.5,
-                key="gui_standby_power_w",
-                disabled=True,
-            )
-            st.number_input(
-                "Nominal power (W)",
-                min_value=0.0,
-                step=0.5,
-                key="gui_nominal_power_w",
-                disabled=True,
-            )
-            st.number_input(
-                "High power (W)",
-                min_value=0.0,
-                step=0.5,
-                key="gui_high_power_w",
-                disabled=True,
-            )
-            st.number_input(
-                "Pulse period (s)",
-                min_value=1.0,
-                step=60.0,
-                key="gui_periodic_period_s",
-                disabled=True,
-            )
-            st.number_input(
-                "Pulse duration (s)",
-                min_value=0.0,
-                step=30.0,
-                key="gui_periodic_high_duration_s",
-                disabled=True,
-            )
-            st.text_area(
-                "Custom intervals (start_s, end_s, power_w)",
-                key="gui_custom_intervals_text",
-                height=80,
-                disabled=True,
-            )
-            st.caption(
-                "Each screening case sets its own constant internal heating."
-            )
-
-        st.markdown("##### Numerics")
         st.number_input(
-            "Time step (s)",
-            min_value=0.1,
-            max_value=60.0,
+            "Solar irradiance S (W/m²)",
+            min_value=0.0,
             step=1.0,
-            key="gui_time_step_s",
-            help=TERM_HELP["time_step"],
+            key="gui_solar_flux_w_per_m2",
+            help=TERM_HELP["solar"],
+        )
+        st.number_input(
+            "Earth OLR (W/m²)",
+            min_value=0.0,
+            step=1.0,
+            key="gui_earth_olr_w_per_m2",
+            help=TERM_HELP["olr"],
+        )
+        st.number_input(
+            "Earth Bond albedo",
+            min_value=0.0,
+            max_value=1.0,
+            step=0.01,
+            key="gui_earth_bond_albedo",
+            help=TERM_HELP["albedo"],
         )
 
-# Active scenario after Advanced widgets exist.
 active_configuration_id = str(
     st.session_state.get(
         "gui_spacecraft_configuration",
         SpacecraftConfigurationId.LEGACY_SIMPLIFIED.value,
     )
 )
-active_scenario_id = (
-    ThermalScenarioId.CUSTOM.value
-    if mode == "scenario_compare"
-    else str(
-        st.session_state.get("gui_thermal_scenario", ThermalScenarioId.CUSTOM.value)
-    )
+request = apply_spacecraft_configuration(
+    _request_from_state(), active_configuration_id
 )
-
-request = _request_from_state()
-request = apply_spacecraft_configuration(request, active_configuration_id)
-if mode != "scenario_compare":
-    request = apply_thermal_scenario(request, active_scenario_id)
 if mode == "environment_compare":
     request = GuiRunRequest(
         **{
@@ -1013,24 +773,24 @@ if mode == "environment_compare":
 
 if run_clicked:
     try:
-        with st.spinner("Running simulation…"):
-            study = _run_study(mode, request, active_scenario_id)
+        with st.spinner("Running thermal simulation…"):
+            study = _run_study(mode, request)
         st.session_state.study = study
         st.session_state.study_fingerprint = request_fingerprint(
-            mode, request, active_scenario_id, active_configuration_id
+            mode, request, active_configuration_id
         )
         config_labels = dict(configuration_select_options())
-        scenario_labels = dict(scenario_select_options())
         st.session_state.study_report_meta = ReportMeta(
             configuration_id=active_configuration_id,
             configuration_label=config_labels.get(
                 active_configuration_id, active_configuration_id
             ),
-            scenario_id=active_scenario_id,
-            scenario_label=scenario_labels.get(active_scenario_id, active_scenario_id),
         )
         st.session_state.sample_index = 0
+        # Prefer Case A after every Compare Heat Sources solve (callback also sets this).
         st.session_state.inspect_case_name = default_inspect_curve_name(study)
+        run_id = int(st.session_state.get("inspect_run_id", 0))
+        st.session_state[f"inspect_case_{run_id}"] = default_inspect_curve_name(study)
         st.success("Simulation complete.")
     except Exception as exc:  # noqa: BLE001
         st.error(f"Simulation failed: {exc}")
@@ -1041,27 +801,12 @@ if study is None:
         "Set the spacecraft and orbit in the sidebar, then click **Run Simulation**. "
         "Defaults are ready to use."
     )
-    with st.expander("What the heating terms mean"):
-        st.markdown(
-            f"""
-| Term | Meaning |
-| --- | --- |
-| **Direct solar heating** | Sunlight absorbed by the spacecraft (zero in eclipse). |
-| **Earth infrared** | {TERM_HELP["earth_ir"]} |
-| **Albedo** | {TERM_HELP["albedo"]} |
-| **Internal heating** | {TERM_HELP["internal"]} |
-| **Radiative cooling** | {TERM_HELP["radiative"]} |
-| **Eclipse** | {TERM_HELP["eclipse"]} |
-            """
-        )
     st.stop()
 
 inputs_changed = (
     st.session_state.study_fingerprint is not None
     and st.session_state.study_fingerprint
-    != request_fingerprint(
-        mode, request, active_scenario_id, active_configuration_id
-    )
+    != request_fingerprint(mode, request, active_configuration_id)
 )
 if inputs_changed:
     st.warning(
@@ -1072,7 +817,6 @@ curves = all_curves(study)
 primary = study.primary
 primary_metrics = temperature_metrics_c(primary.result)
 
-# --- Key results ---
 st.markdown(
     f'<p class="sta-section-label">Results · {MODE_LABELS.get(study.mode, study.mode)}</p>',
     unsafe_allow_html=True,
@@ -1082,100 +826,82 @@ m1.metric("Final temperature", f"{primary_metrics['final_c']:.2f} °C")
 m2.metric("Minimum", f"{primary_metrics['minimum_c']:.2f} °C")
 m3.metric("Maximum", f"{primary_metrics['maximum_c']:.2f} °C")
 
-if study.mode == "baseline_compare" and study.companions:
-    baseline_final = temperature_metrics_c(study.companions[0].result)["final_c"]
-    delta_k = primary_metrics["final_c"] - baseline_final
-    st.caption(
-        f"Your result minus Reference: **{delta_k:+.2f} K** "
-        f"(Reference {baseline_final:.2f} °C → Modified {primary_metrics['final_c']:.2f} °C)."
+if study.mode == "environment_compare":
+    st.caption(environment_comparison_interpretation(curves))
+    st.dataframe(
+        environment_comparison_summary_rows(curves),
+        use_container_width=True,
+        hide_index=True,
     )
-elif study.mode == "environment_compare" and len(curves) == 3:
-    with st.expander("Heat-source comparison summary", expanded=True):
-        st.dataframe(
-            environment_comparison_summary_rows(curves),
-            hide_index=True,
-            use_container_width=True,
-        )
-        st.caption(environment_comparison_interpretation(curves))
-elif study.mode == SCENARIO_COMPARE_MODE and len(curves) == 3:
-    with st.expander("Conditions comparison summary", expanded=True):
-        st.dataframe(
-            scenario_comparison_summary_rows(curves),
-            hide_index=True,
-            use_container_width=True,
-        )
-        st.caption(scenario_comparison_interpretation(curves))
 
-if len(curves) > 1:
-    source_names = [curve.name for curve in curves]
-    default_name = default_inspect_curve_name(study)
-    if st.session_state.get("inspect_case_name") not in source_names:
-        st.session_state.inspect_case_name = default_name
-    selected_name = st.selectbox(
-        "Inspect case",
-        options=source_names,
-        key="inspect_case_name",
-        help=(
-            "All cases stay on the temperature graph. This chooses which result "
-            "feeds the 3D view and heat-flow details."
-        ),
-    )
-    viz_curve = resolve_inspect_curve(curves, selected_name, default_name)
-else:
-    viz_curve = primary
-    st.session_state.inspect_case_name = viz_curve.name
-
-# --- Temperature history ---
+# --- Temperature ---
 st.markdown("### Temperature over time")
-n_viz_samples = len(viz_curve.result.time_s)
-max_sample_index = max(0, n_viz_samples - 1)
+source_names = [curve.name for curve in curves]
+default_name = default_inspect_curve_name(study)
+if st.session_state.get("inspect_case_name") not in source_names:
+    st.session_state.inspect_case_name = default_name
+if study.mode == "environment_compare":
+    _inspect_display = {
+        ENV_CASE_A: "A — No Earth Heating",
+        ENV_CASE_B: "B — With Earth Infrared",
+        ENV_CASE_C: "C — With Earth Infrared and Albedo",
+    }
+    # Remount per run so Streamlit cannot keep a prior Case C selection.
+    inspect_widget_key = f"inspect_case_{int(st.session_state.get('inspect_run_id', 0))}"
+    if inspect_widget_key not in st.session_state:
+        st.session_state[inspect_widget_key] = default_name
+    inspect_name = st.segmented_control(
+        "Inspect results for",
+        options=source_names,
+        key=inspect_widget_key,
+        default=default_name,
+        required=True,
+        format_func=lambda name: _inspect_display.get(name, name),
+        help=TERM_HELP["inspect_case"],
+        width="stretch",
+        wrap=True,
+    )
+    if inspect_name is None:
+        inspect_name = default_name
+    st.session_state.inspect_case_name = inspect_name
+    st.caption(
+        "All three temperature curves stay on the graph. This choice updates the "
+        "detailed temperature, orbit view, selected-time values, and heat-flow "
+        "analysis below."
+    )
+else:
+    inspect_name = default_name
+    st.session_state.inspect_case_name = inspect_name
+
+viz_curve = resolve_inspect_curve(curves, inspect_name, default_name)
+n_samples = len(viz_curve.result.time_s)
 st.session_state.sample_index = clamp_sample_index(
-    n_viz_samples,
-    int(st.session_state.get("sample_index", 0)),
+    n_samples, int(st.session_state.get("sample_index", 0))
 )
-sample_index = st.slider(
+viz_index = st.slider(
     "Time sample",
     min_value=0,
-    max_value=max_sample_index,
-    step=1,
+    max_value=max(0, n_samples - 1),
     key="sample_index",
-    help="Move through the simulated timeline. The red marker follows this sample.",
+    help="Inspect temperature, heat flow, eclipse state, and orbital position together.",
 )
-viz_index = sample_index
-selected_time_s = viz_curve.result.time_s[viz_index]
-selected_time_min = selected_time_s / 60.0
-viz_period = orbital_period_s(viz_curve.orbit)
-orbit_number_selected = selected_time_s / viz_period + 1.0
-status_now = "Eclipsed" if viz_curve.result.in_eclipse[viz_index] else "Sunlit"
+period_s = orbital_period_s(viz_curve.orbit)
+t_s = viz_curve.result.time_s[viz_index]
+temp_c = (
+    viz_curve.result.temperature_k[viz_index] - 273.15
+)
+eclipsed = bool(viz_curve.result.in_eclipse[viz_index])
 st.caption(
-    f"{selected_time_min:.2f} min · orbit {orbit_number_selected:.2f} · "
-    f"{status_now} · β = {viz_curve.request.beta_deg:.1f}°"
+    f"{t_s / 60.0:.2f} min · orbit {t_s / period_s + 1.0:.2f} · "
+    f"{'Eclipse' if eclipsed else 'Sunlit'} · β = {viz_curve.request.beta_deg:.1f}°"
 )
 
 if study.mode == "single":
     temp_fig = make_gui_temperature_figure(
-        primary.result,
+        study.primary.result,
         marker_index=viz_index,
-        title="Orbital temperature",
-        label=primary.name,
-    )
-elif study.mode == "baseline_compare":
-    temp_fig = make_comparison_temperature_figure(
-        curves,
-        marker_index=viz_index,
-        marker_curve_name=viz_curve.name,
-        emphasize_name=viz_curve.name,
-        title="Reference vs your settings",
-        shade_from=curves[0],
-    )
-elif study.mode == SCENARIO_COMPARE_MODE:
-    temp_fig = make_comparison_temperature_figure(
-        curves,
-        marker_index=viz_index,
-        marker_curve_name=viz_curve.name,
-        emphasize_name=viz_curve.name,
-        title="Cold / Normal / Hot conditions",
-        shade_from=curves[0],
+        title="Predicted spacecraft temperature",
+        label=study.primary.name,
     )
 else:
     temp_fig = make_comparison_temperature_figure(
@@ -1186,9 +912,15 @@ else:
         title="Heat-source comparison",
         shade_from=curves[0],
     )
-st.pyplot(temp_fig, clear_figure=True, use_container_width=True)
+st.pyplot(temp_fig, use_container_width=True)
 st.caption("Grey bands mark eclipse (Earth blocking sunlight).")
 
+# --- Orbit + state ---
+st.markdown("### Orbit visualization")
+st.caption(
+    "Earth stays tipped (~23°) while the satellite orbits. Drag to spin the scene. "
+    "Wings and antennas are visual only."
+)
 snap = heat_flow_at_index(
     result=viz_curve.result,
     index=viz_index,
@@ -1199,266 +931,193 @@ snap = heat_flow_at_index(
     earth_infrared=viz_curve.earth_infrared,
     albedo=viz_curve.albedo,
     thermal_model=viz_curve.request.thermal_model,
-    geometry=geometry_from_request(viz_curve.request),
-    attitude_mode=viz_curve.request.attitude_mode,
+    geometry=(
+        None
+        if viz_curve.request.thermal_model == "legacy"
+        else geometry_from_request(viz_curve.request)
+    ),
+    attitude_mode=AttitudeMode.FIXED_INERTIAL.value,
     power_schedule=power_schedule_from_request(viz_curve.request),
 )
-orbit_number = snap.time_s / viz_period + 1.0
 
-# --- 3D orbit ---
-st.markdown("### Orbit visualization")
-st.caption(
-    "Earth stays tipped (~23°) while the satellite orbits. Drag to spin around "
-    "the scene (Earth will not flip upside down). Wings and antennas are visual only."
-)
-viz_left, viz_right = st.columns([1.3, 0.9], gap="medium")
-with viz_left:
+left, right = st.columns([1.55, 1.0], gap="large")
+with left:
     fig3d = build_orbit_3d_figure(
         result=viz_curve.result,
         orbit=viz_curve.orbit,
         sample_index=viz_index,
         title=viz_curve.name,
-        attitude_mode=viz_curve.request.attitude_mode,
+        attitude_mode=AttitudeMode.FIXED_INERTIAL.value,
         body_length_m=viz_curve.request.body_length_m,
         body_width_m=viz_curve.request.body_width_m,
         body_height_m=viz_curve.request.body_height_m,
         thermal_model=viz_curve.request.thermal_model,
     )
-    st.plotly_chart(
-        fig3d,
-        use_container_width=True,
-        config={
-            "displayModeBar": True,
-            "responsive": True,
-            "scrollZoom": True,
-        },
-    )
-
-with viz_right:
-    status_text = "Eclipsed" if snap.in_eclipse else "Sunlit"
+    fig3d.update_layout(height=560)
+    st.plotly_chart(fig3d, use_container_width=True)
+with right:
     st.markdown(
         f"""
 <div class="sta-state-panel">
-  <div>
+  <div class="sta-panel-block sta-panel-status">
     <h5>At selected time</h5>
     <div class="sta-state-grid">
-      <div class="sta-state-card"><div class="lbl">Temperature</div><div class="val">{snap.temperature_c:.2f} °C</div></div>
-      <div class="sta-state-card"><div class="lbl">Status</div><div class="val">{status_text}</div></div>
-      <div class="sta-state-card"><div class="lbl">Time</div><div class="val">{snap.time_s/60.0:.2f} min</div></div>
-      <div class="sta-state-card"><div class="lbl">Orbit</div><div class="val">{orbit_number:.2f}</div></div>
+      <div class="sta-state-card"><div class="lbl">Temperature</div>
+        <div class="val">{temp_c:.2f} °C</div></div>
+      <div class="sta-state-card"><div class="lbl">Status</div>
+        <div class="val">{'Eclipse' if eclipsed else 'Sunlit'}</div></div>
+      <div class="sta-state-card"><div class="lbl">Time</div>
+        <div class="val">{t_s / 60.0:.2f} min</div></div>
+      <div class="sta-state-card"><div class="lbl">Orbit</div>
+        <div class="val">{t_s / period_s + 1.0:.2f}</div></div>
     </div>
   </div>
-  <div>
-    <h5>Heating and cooling (W)</h5>
-    <div class="sta-state-grid">
-      <div class="sta-state-card"><div class="lbl">Sunlight</div><div class="val">{snap.q_solar_w:.2f} W</div></div>
-      <div class="sta-state-card"><div class="lbl">Earth IR</div><div class="val">{snap.q_earth_ir_w:.2f} W</div></div>
-      <div class="sta-state-card"><div class="lbl">Albedo</div><div class="val">{snap.q_albedo_w:.2f} W</div></div>
-      <div class="sta-state-card"><div class="lbl">Internal</div><div class="val">{snap.q_internal_w:.2f} W</div></div>
-      <div class="sta-state-card"><div class="lbl">Cooling</div><div class="val">{snap.q_radiated_w:.2f} W</div></div>
-      <div class="sta-state-card"><div class="lbl">Net</div><div class="val">{snap.q_net_w:.2f} W</div></div>
+  <div class="sta-panel-block sta-panel-heat">
+    <div class="sta-panel-heading">Heating and cooling (W)</div>
+    <div class="sta-heat-grid">
+      <div class="sta-heat-card"><div class="lbl">Sunlight</div>
+        <div class="val">{snap.q_solar_w:.2f}</div></div>
+      <div class="sta-heat-card"><div class="lbl">Earth IR</div>
+        <div class="val">{snap.q_earth_ir_w:.2f}</div></div>
+      <div class="sta-heat-card"><div class="lbl">Albedo</div>
+        <div class="val">{snap.q_albedo_w:.2f}</div></div>
+      <div class="sta-heat-card"><div class="lbl">Internal</div>
+        <div class="val">{snap.q_internal_w:.2f}</div></div>
+      <div class="sta-heat-card"><div class="lbl">Cooling</div>
+        <div class="val">{snap.q_radiated_w:.2f}</div></div>
+      <div class="sta-heat-card sta-heat-net"><div class="lbl">Net</div>
+        <div class="val">{snap.q_net_w:.2f}</div></div>
     </div>
   </div>
 </div>
-        """,
+""",
         unsafe_allow_html=True,
     )
 
-# --- Collapsed details ---
-with st.expander("Heat-flow chart and analysis", expanded=False):
-    st.pyplot(make_heat_flow_bar_figure(snap), clear_figure=True, use_container_width=True)
-    st.caption(
-        "Positive values heat the spacecraft; radiative cooling is shown as negative. "
-        f"Inspecting **{viz_curve.name}**."
-    )
+# --- Heat flow chart ---
+st.markdown("### Heat-flow analysis")
+st.caption(
+    "Instantaneous heat flows at the selected time sample for the inspection case."
+)
+st.pyplot(make_heat_flow_bar_figure(snap), use_container_width=True)
+if study.mode == "environment_compare":
     st.dataframe(
         comparison_metrics_rows(curves),
-        hide_index=True,
         use_container_width=True,
+        hide_index=True,
     )
-    if study.mode == "baseline_compare" and study.companions:
-        rows = changed_parameter_rows(study.companions[0].request, primary.request)
-        if rows:
-            st.markdown("##### What changed vs reference")
-            st.dataframe(rows, hide_index=True, use_container_width=True)
-        else:
-            st.info("Your settings match the reference, so the curves overlap.")
-    elif study.mode == "environment_compare" and len(curves) == 3:
-        st.markdown(
-            """
-| Case | Includes |
-| --- | --- |
-| **A – No Earth Heating** | Sunlight, internal heat, cooling to space |
-| **B – With Earth Infrared** | A + Earth infrared |
-| **C – With Earth Infrared and Albedo** | B + reflected sunlight |
-            """
-        )
-    elif study.mode == SCENARIO_COMPARE_MODE and len(curves) == 3:
-        st.markdown(
-            """
-| Scenario | Idea |
-| --- | --- |
-| **Cold** | Weaker sunlight, longer eclipse, lower internal heat |
-| **Nominal** | Repository educational defaults |
-| **Hot** | Stronger sunlight, little or no eclipse, higher internal heat |
-            """
-        )
 
-with st.expander("Assumptions", expanded=False):
+with st.expander("Assumptions and limitations", expanded=False):
     st.markdown(
         f"""
-- {TERM_HELP["single_node"]}
-- Areas are model inputs, not CAD surfaces.
-- {TERM_HELP["eclipse"]} {TERM_HELP["beta"]}
-- {TERM_HELP["thermal_model"]}
-- {TERM_HELP["attitude"]}
-- {TERM_HELP["power_schedule"]}
-- {TERM_HELP["thermal_scenario"]}
-- 3D craft is enlarged for visibility; wing panels are visual-only.
-- Results check numerical consistency — not flight-data validation.
-- See `docs/MODEL.md` for equations and assumptions.
+- {TERM_HELP['single_node']}
+- Circular LEO with a cylindrical Earth-shadow eclipse model.
+- Direct solar and albedo heating are zero in eclipse.
+- Earth IR and albedo use effective areas (not full view-factor geometry).
+- Enhanced solar heating uses fixed inertial face orientation only.
+- Constant internal power only — not a flight power budget.
+- Educational model: not flight-qualified thermal analysis.
         """
     )
 
-with st.expander("Export", expanded=False):
-    st.caption(
-        "Downloads use the last completed run. The PDF and images follow the "
-        "selected time marker on that completed run."
-    )
-    if study.mode == "single":
-        export_temp = make_gui_temperature_figure(
-            primary.result,
-            marker_index=viz_index,
-            title="Orbital temperature",
-        )
-    elif study.mode == "baseline_compare":
-        export_temp = make_comparison_temperature_figure(
-            curves,
-            marker_index=viz_index,
-            marker_curve_name=viz_curve.name,
-            emphasize_name=viz_curve.name,
-            title="Reference vs your settings",
-            shade_from=curves[0],
-        )
-    elif study.mode == SCENARIO_COMPARE_MODE:
-        export_temp = make_comparison_temperature_figure(
-            curves,
-            marker_index=viz_index,
-            marker_curve_name=viz_curve.name,
-            emphasize_name=viz_curve.name,
-            title="Cold / Normal / Hot conditions",
-            shade_from=curves[0],
-        )
-    else:
-        export_temp = make_comparison_temperature_figure(
-            curves,
-            marker_index=viz_index,
-            marker_curve_name=viz_curve.name,
-            emphasize_name=viz_curve.name,
-            title="Heat-source comparison",
-            shade_from=curves[0],
-        )
-    export_heat = make_heat_flow_bar_figure(snap)
-    d1, d2, d3 = st.columns(3)
-    with d1:
-        st.download_button(
-            "Temperature CSV",
-            data=temperature_history_csv(curves),
-            file_name="temperature_history.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-    with d2:
-        st.download_button(
-            "Temperature PNG",
-            data=figure_to_png_bytes(export_temp),
-            file_name="temperature_history.png",
-            mime="image/png",
-            use_container_width=True,
-        )
-    with d3:
-        st.download_button(
-            "Heat-flow PNG",
-            data=figure_to_png_bytes(export_heat),
-            file_name="heat_flow.png",
-            mime="image/png",
-            use_container_width=True,
-        )
-
-    st.markdown("##### Engineering report")
-    if inputs_changed:
-        st.warning(
-            "Settings have changed since this run. Click **Run Simulation** "
-            "before preparing a PDF so the report matches the plots above."
-        )
-    report_meta = st.session_state.get("study_report_meta")
-    if report_meta is None:
-        report_meta = ReportMeta(
-            configuration_id=active_configuration_id,
-            configuration_label=dict(configuration_select_options()).get(
-                active_configuration_id, active_configuration_id
-            ),
-            scenario_id=active_scenario_id,
-            scenario_label=dict(scenario_select_options()).get(
-                active_scenario_id, active_scenario_id
-            ),
-        )
-    pdf_cache_key = (
-        st.session_state.study_fingerprint,
-        viz_curve.name,
-        int(viz_index),
-    )
-    prepare_pdf = st.button(
-        "Prepare Engineering Report (PDF)",
+# --- Export ---
+st.markdown("### Export")
+st.caption(
+    "Downloads use the last completed run. The PDF and images follow the selected "
+    "time marker on that completed run."
+)
+csv_bytes = temperature_history_csv(curves).encode("utf-8")
+c1, c2, c3 = st.columns(3)
+with c1:
+    st.download_button(
+        "Temperature CSV",
+        data=csv_bytes,
+        file_name="satellite_thermal_temperature.csv",
+        mime="text/csv",
         use_container_width=True,
         disabled=inputs_changed,
-        help=(
-            "Builds a multi-page PDF for the completed simulation at the "
-            "selected time marker. Then use the download button below."
+    )
+with c2:
+    st.download_button(
+        "Temperature PNG",
+        data=figure_to_png_bytes(temp_fig),
+        file_name="satellite_thermal_temperature.png",
+        mime="image/png",
+        use_container_width=True,
+        disabled=inputs_changed,
+    )
+with c3:
+    st.download_button(
+        "Heat-flow PNG",
+        data=figure_to_png_bytes(make_heat_flow_bar_figure(snap)),
+        file_name="satellite_thermal_heat_flow.png",
+        mime="image/png",
+        use_container_width=True,
+        disabled=inputs_changed,
+    )
+
+st.markdown("##### Engineering report")
+report_meta = st.session_state.get("study_report_meta")
+if report_meta is None or inputs_changed:
+    report_meta = ReportMeta(
+        configuration_id=active_configuration_id,
+        configuration_label=dict(configuration_select_options()).get(
+            active_configuration_id, active_configuration_id
         ),
     )
-    if prepare_pdf and not inputs_changed:
-        try:
-            with st.spinner("Building engineering PDF…"):
-                ensure_kaleido_browser_configured()
-                report = build_engineering_report_pdf(
-                    study,
-                    viz_curve=viz_curve,
-                    sample_index=viz_index,
-                    meta=report_meta,
-                )
-            st.session_state.pdf_report_bytes = report.pdf_bytes
-            st.session_state.pdf_report_key = pdf_cache_key
-            st.session_state.pdf_orbital_included = report.orbital_snapshot_included
-            st.success("PDF ready — use the download button below.")
-            if not report.orbital_snapshot_included:
-                st.warning(
-                    "The engineering report was generated without the optional "
-                    "3D orbital image because the image renderer was unavailable. "
-                    "Temperature history, heat-flow results, and all other sections "
-                    "are still included."
-                )
-        except Exception as exc:  # noqa: BLE001
-            st.session_state.pdf_report_bytes = None
-            st.session_state.pdf_report_key = None
-            st.session_state.pdf_orbital_included = None
-            st.error(f"PDF report could not be generated: {exc}")
+pdf_cache_key = (
+    st.session_state.study_fingerprint,
+    viz_curve.name,
+    int(viz_index),
+)
+prepare_pdf = st.button(
+    "Prepare Engineering Report (PDF)",
+    use_container_width=True,
+    disabled=inputs_changed,
+    help="Builds a multi-page PDF for the completed simulation at the selected time.",
+)
+if prepare_pdf and not inputs_changed:
+    try:
+        with st.spinner("Building engineering PDF…"):
+            ensure_kaleido_browser_configured()
+            report = build_engineering_report_pdf(
+                study,
+                viz_curve=viz_curve,
+                sample_index=viz_index,
+                meta=report_meta,
+            )
+        st.session_state.pdf_report_bytes = report.pdf_bytes
+        st.session_state.pdf_report_key = pdf_cache_key
+        st.session_state.pdf_orbital_included = report.orbital_snapshot_included
+        st.success("PDF ready — use the download button below.")
+        if not report.orbital_snapshot_included:
+            st.warning(
+                "The engineering report was generated without the optional "
+                "3D orbital image because the image renderer was unavailable. "
+                "Temperature history, heat-flow results, and all other sections "
+                "are still included."
+            )
+    except Exception as exc:  # noqa: BLE001
+        st.session_state.pdf_report_bytes = None
+        st.session_state.pdf_report_key = None
+        st.session_state.pdf_orbital_included = None
+        st.error(f"PDF report could not be generated: {exc}")
 
-    pdf_ready = (
-        st.session_state.get("pdf_report_bytes")
-        and st.session_state.get("pdf_report_key") == pdf_cache_key
-        and not inputs_changed
+pdf_ready = (
+    st.session_state.get("pdf_report_bytes")
+    and st.session_state.get("pdf_report_key") == pdf_cache_key
+    and not inputs_changed
+)
+if pdf_ready:
+    st.download_button(
+        "Download Engineering Report (PDF)",
+        data=st.session_state.pdf_report_bytes,
+        file_name="satellite_thermal_engineering_report.pdf",
+        mime="application/pdf",
+        use_container_width=True,
     )
-    if pdf_ready:
-        st.download_button(
-            "Download Engineering Report (PDF)",
-            data=st.session_state.pdf_report_bytes,
-            file_name="satellite_thermal_engineering_report.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-        )
-    elif not inputs_changed:
-        st.caption(
-            "Click **Prepare Engineering Report (PDF)** after choosing the "
-            "time sample you want in the orbital snapshot."
-        )
+elif not inputs_changed:
+    st.caption(
+        "Click **Prepare Engineering Report (PDF)** after choosing the "
+        "time sample you want in the orbital snapshot."
+    )
