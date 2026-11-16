@@ -383,7 +383,7 @@ def environment_comparison_summary_rows(
                 curves[1].name, "Earth infrared included"
             ),
             "Final temperature (°C)": round(finals[1], 2),
-            "Temperature change": f"B − A = {finals[1] - finals[0]:+.2f} K",
+            "Temperature change": f"B − A = {finals[1] - finals[0]:+.2f} °C",
         },
         {
             "Case": curves[2].name,
@@ -391,7 +391,7 @@ def environment_comparison_summary_rows(
                 curves[2].name, "Earth infrared + albedo"
             ),
             "Final temperature (°C)": round(finals[2], 2),
-            "Temperature change": f"C − B = {finals[2] - finals[1]:+.2f} K",
+            "Temperature change": f"C − B = {finals[2] - finals[1]:+.2f} °C",
         },
     ]
 
